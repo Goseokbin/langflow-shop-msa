@@ -1,0 +1,649 @@
+{
+  "name": "Langflow Package Patch Demo",
+  "platform": "node",
+  "meta": {
+    "version": 5,
+    "layout": "flow",
+    "workerGroup": "default",
+    "description": "Plan → constrained package patch PR → PR checks → review/merge → existing deployment pipeline → evidence verification. No automatic merge."
+  },
+  "variables": [
+    {
+      "name": "operation",
+      "isInput": true,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "string",
+        "enum": [
+          "plan",
+          "create-pr",
+          "verify",
+          "auto"
+        ]
+      },
+      "value": "\"plan\""
+    },
+    {
+      "name": "config",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "{\"repository\": \"OWNER/REPOSITORY\", \"concert_host\": \"CONCERT_HOST_WITHOUT_PROTOCOL\", \"application_api\": \"/concert/core/api/v2/applications/APP_ID/versions/VERSION_ID\", \"source_repo_id\": \"SOURCE_REPOSITORY_BRANCH_ID\", \"github_auth\": \"USERNAME/GitHubPatchAuth\", \"concert_auth\": \"USERNAME/ConcertPatchAuth\", \"policy\": {\"package\": \"requests\", \"from_version\": \"2.31.0\", \"to_version\": \"2.33.0\", \"file\": \"services/langflow-ai-service/requirements.txt\", \"service\": \"langflow-ai-service\", \"branch\": \"concert-patch/requests-2.33.0\", \"cves\": [\"CVE-2024-35195\", \"CVE-2024-47081\", \"CVE-2026-25645\"]}}"
+    },
+    {
+      "name": "result",
+      "isInput": false,
+      "isOutput": true,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "{}"
+    },
+    {
+      "name": "source",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "null"
+    },
+    {
+      "name": "before",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "null"
+    },
+    {
+      "name": "after",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "null"
+    },
+    {
+      "name": "evidence",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "null"
+    },
+    {
+      "name": "alreadyFixed",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "null"
+    },
+    {
+      "name": "existing",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "null"
+    },
+    {
+      "name": "main",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "null"
+    },
+    {
+      "name": "branchSource",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "null"
+    },
+    {
+      "name": "needsCommit",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "null"
+    },
+    {
+      "name": "releaseRun",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "null"
+    }
+  ],
+  "blocks": [
+    {
+      "name": "01_ValidatePolicy",
+      "function": "\nif (![\"plan\", \"create-pr\", \"verify\", \"auto\"].includes($operation)) throw new Error(\"Unsupported operation\");\nif (!/^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$/.test($config.repository)) throw new Error(\"Invalid repository\");\nif ($config.policy.package !== \"requests\" || $config.policy.to_version !== \"2.33.0\") throw new Error(\"Policy is not approved\");\n"
+    },
+    {
+      "name": "02_ReadConcertFindings",
+      "action": "system/Common/HTTP/HTTP Request",
+      "inputs": [
+        {
+          "name": "method",
+          "value": "\"GET\""
+        },
+        {
+          "name": "host",
+          "value": "\"https://\" + $config.concert_host"
+        },
+        {
+          "name": "path",
+          "value": "$config.application_api + \"/source_repos/\" + $config.source_repo_id + \"/cve_findings\""
+        },
+        {
+          "name": "headers",
+          "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"User-Agent\":\"Concert-Patch-Demo\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+        },
+        {
+          "name": "authKey",
+          "value": "$config.concert_auth"
+        },
+        {
+          "name": "rejectUnauthorized",
+          "value": "true"
+        },
+        {
+          "name": "timeout",
+          "value": "60"
+        },
+        {
+          "name": "query",
+          "value": "{\"page_size\":2000}"
+        }
+      ]
+    },
+    {
+      "name": "03_ReadConcertInventory",
+      "action": "system/Common/HTTP/HTTP Request",
+      "inputs": [
+        {
+          "name": "method",
+          "value": "\"GET\""
+        },
+        {
+          "name": "host",
+          "value": "\"https://\" + $config.concert_host"
+        },
+        {
+          "name": "path",
+          "value": "$config.application_api + \"/source_repos/\" + $config.source_repo_id + \"/packages\""
+        },
+        {
+          "name": "headers",
+          "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"User-Agent\":\"Concert-Patch-Demo\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+        },
+        {
+          "name": "authKey",
+          "value": "$config.concert_auth"
+        },
+        {
+          "name": "rejectUnauthorized",
+          "value": "true"
+        },
+        {
+          "name": "timeout",
+          "value": "60"
+        },
+        {
+          "name": "query",
+          "value": "{\"page_size\":2000}"
+        }
+      ]
+    },
+    {
+      "name": "04_ReadSource",
+      "action": "system/Common/HTTP/HTTP Request",
+      "inputs": [
+        {
+          "name": "method",
+          "value": "\"GET\""
+        },
+        {
+          "name": "host",
+          "value": "\"https://api.github.com\""
+        },
+        {
+          "name": "path",
+          "value": "\"/repos/\" + $config.repository + \"/contents/\" + $config.policy.file"
+        },
+        {
+          "name": "headers",
+          "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"User-Agent\":\"Concert-Patch-Demo\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+        },
+        {
+          "name": "authKey",
+          "value": "$config.github_auth"
+        },
+        {
+          "name": "rejectUnauthorized",
+          "value": "true"
+        },
+        {
+          "name": "timeout",
+          "value": "60"
+        },
+        {
+          "name": "query",
+          "value": "{\"ref\":\"main\"}"
+        }
+      ]
+    },
+    {
+      "name": "05_AssessPatch",
+      "function": "\nfunction json(x) { return typeof x === \"string\" ? JSON.parse(x) : x; }\nfor (const step of [$02_ReadConcertFindings,$03_ReadConcertInventory,$04_ReadSource]) {\n if (step.statusCode !== 200) throw new Error(\"Evidence read failed: HTTP \" + step.statusCode);\n}\nconst findings=json($02_ReadConcertFindings.result);\nif (findings.pagination && findings.pagination.total_count > 2000) throw new Error(\"Findings pagination requires extension\");\nconst inventory=json($03_ReadConcertInventory.result);\nif (inventory.pagination && inventory.pagination.total_count > 2000) throw new Error(\"Inventory pagination requires extension\");\nconst p=$config.policy;\n$source=json($04_ReadSource.result);\n$before=Buffer.from($source.content.replace(/\\n/g,\"\"),\"base64\").toString(\"utf8\");\n$evidence=(findings.cve_findings||[]).filter(f=>f.package_name===p.package && f.package_version===p.from_version && p.cves.includes(f.cve));\n$alreadyFixed=$before.split(/\\r?\\n/).includes(p.package+\"==\"+p.to_version);\n$result={operation:$operation,package:p.package,from:p.from_version,to:p.to_version,file:p.file,\n target_cves:p.cves,concert_finding_rows:$evidence.length,status:$alreadyFixed?\"source_already_patched\":\"patch_proposed\"};\nif (!$alreadyFixed) {\n const found=[...new Set($evidence.map(f=>f.cve))];\n if (!p.cves.every(c=>found.includes(c))) throw new Error(\"Expected Concert CVE evidence is missing\");\n if ($before.split(/\\r?\\n/).filter(l=>l===p.package+\"==\"+p.from_version).length!==1) throw new Error(\"Base dependency changed; review required\");\n const allowedFixed=[\"2.32.0\",\"2.32.4\",\"2.33.0\"];\n if ($evidence.some(f=>!allowedFixed.some(v=>f.fixed_version===\"Upgrade requests to version \"+v))) throw new Error(\"Fix recommendation changed; review required\");\n $after=$before.replace(p.package+\"==\"+p.from_version,p.package+\"==\"+p.to_version);\n}\n"
+    },
+    {
+      "action": "if",
+      "name": "06_CreatePRWhenRequested",
+      "condition": "[\"create-pr\",\"auto\"].includes($operation) && !$alreadyFixed",
+      "then": [
+        {
+          "name": "FindExistingPR",
+          "action": "system/Common/HTTP/HTTP Request",
+          "inputs": [
+            {
+              "name": "method",
+              "value": "\"GET\""
+            },
+            {
+              "name": "host",
+              "value": "\"https://api.github.com\""
+            },
+            {
+              "name": "path",
+              "value": "\"/repos/\" + $config.repository + \"/pulls\""
+            },
+            {
+              "name": "headers",
+              "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"User-Agent\":\"Concert-Patch-Demo\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+            },
+            {
+              "name": "authKey",
+              "value": "$config.github_auth"
+            },
+            {
+              "name": "rejectUnauthorized",
+              "value": "true"
+            },
+            {
+              "name": "timeout",
+              "value": "60"
+            },
+            {
+              "name": "query",
+              "value": "{\"state\":\"open\",\"head\":$config.repository.split(\"/\")[0]+\":\"+$config.policy.branch}"
+            }
+          ]
+        },
+        {
+          "name": "CheckExistingPR",
+          "function": "\nif ($FindExistingPR.statusCode!==200) throw new Error(\"Cannot read existing PRs\");\n$existing=typeof $FindExistingPR.result===\"string\"?JSON.parse($FindExistingPR.result):$FindExistingPR.result;\nif ($existing.length) $result={...$result,status:\"existing_pr\",pull_request:$existing[0].html_url,number:$existing[0].number};\n"
+        },
+        {
+          "action": "if",
+          "name": "CreateOnlyOnce",
+          "condition": "$existing.length === 0",
+          "then": [
+            {
+              "name": "ReadMainCommit",
+              "action": "system/Common/HTTP/HTTP Request",
+              "inputs": [
+                {
+                  "name": "method",
+                  "value": "\"GET\""
+                },
+                {
+                  "name": "host",
+                  "value": "\"https://api.github.com\""
+                },
+                {
+                  "name": "path",
+                  "value": "\"/repos/\" + $config.repository + \"/git/ref/heads/main\""
+                },
+                {
+                  "name": "headers",
+                  "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"User-Agent\":\"Concert-Patch-Demo\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+                },
+                {
+                  "name": "authKey",
+                  "value": "$config.github_auth"
+                },
+                {
+                  "name": "rejectUnauthorized",
+                  "value": "true"
+                },
+                {
+                  "name": "timeout",
+                  "value": "60"
+                }
+              ]
+            },
+            {
+              "name": "RequireMainCommit",
+              "function": "if ($ReadMainCommit.statusCode!==200) throw new Error(\"Cannot read main commit\");\n$main=typeof $ReadMainCommit.result===\"string\"?JSON.parse($ReadMainCommit.result):$ReadMainCommit.result;"
+            },
+            {
+              "name": "CreatePatchBranch",
+              "action": "system/Common/HTTP/HTTP Request",
+              "inputs": [
+                {
+                  "name": "method",
+                  "value": "\"POST\""
+                },
+                {
+                  "name": "host",
+                  "value": "\"https://api.github.com\""
+                },
+                {
+                  "name": "path",
+                  "value": "\"/repos/\" + $config.repository + \"/git/refs\""
+                },
+                {
+                  "name": "headers",
+                  "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"User-Agent\":\"Concert-Patch-Demo\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+                },
+                {
+                  "name": "authKey",
+                  "value": "$config.github_auth"
+                },
+                {
+                  "name": "rejectUnauthorized",
+                  "value": "true"
+                },
+                {
+                  "name": "timeout",
+                  "value": "60"
+                },
+                {
+                  "name": "body",
+                  "value": "{\"ref\":\"refs/heads/\"+$config.policy.branch,\"sha\":$main.object.sha}"
+                }
+              ]
+            },
+            {
+              "name": "RequireBranch",
+              "function": "if ($CreatePatchBranch.statusCode!==201 && $CreatePatchBranch.statusCode!==422) throw new Error(\"Cannot create patch branch\");"
+            },
+            {
+              "name": "ReadBranchSource",
+              "action": "system/Common/HTTP/HTTP Request",
+              "inputs": [
+                {
+                  "name": "method",
+                  "value": "\"GET\""
+                },
+                {
+                  "name": "host",
+                  "value": "\"https://api.github.com\""
+                },
+                {
+                  "name": "path",
+                  "value": "\"/repos/\" + $config.repository + \"/contents/\"+$config.policy.file"
+                },
+                {
+                  "name": "headers",
+                  "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"User-Agent\":\"Concert-Patch-Demo\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+                },
+                {
+                  "name": "authKey",
+                  "value": "$config.github_auth"
+                },
+                {
+                  "name": "rejectUnauthorized",
+                  "value": "true"
+                },
+                {
+                  "name": "timeout",
+                  "value": "60"
+                },
+                {
+                  "name": "query",
+                  "value": "{\"ref\":$config.policy.branch}"
+                }
+              ]
+            },
+            {
+              "name": "GuardBranchContent",
+              "function": "\nif ($ReadBranchSource.statusCode!==200) throw new Error(\"Cannot read patch branch\");\n$branchSource=typeof $ReadBranchSource.result===\"string\"?JSON.parse($ReadBranchSource.result):$ReadBranchSource.result;\nconst content=Buffer.from($branchSource.content.replace(/\\n/g,\"\"),\"base64\").toString(\"utf8\");\nif(content!==$before && content!==$after) throw new Error(\"Existing branch contains unexpected changes\");\n$needsCommit=content===$before;\n"
+            },
+            {
+              "action": "if",
+              "name": "CommitIfNeeded",
+              "condition": "$needsCommit",
+              "then": [
+                {
+                  "name": "CommitVersionPatch",
+                  "action": "system/Common/HTTP/HTTP Request",
+                  "inputs": [
+                    {
+                      "name": "method",
+                      "value": "\"PUT\""
+                    },
+                    {
+                      "name": "host",
+                      "value": "\"https://api.github.com\""
+                    },
+                    {
+                      "name": "path",
+                      "value": "\"/repos/\" + $config.repository + \"/contents/\"+$config.policy.file"
+                    },
+                    {
+                      "name": "headers",
+                      "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"User-Agent\":\"Concert-Patch-Demo\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+                    },
+                    {
+                      "name": "authKey",
+                      "value": "$config.github_auth"
+                    },
+                    {
+                      "name": "rejectUnauthorized",
+                      "value": "true"
+                    },
+                    {
+                      "name": "timeout",
+                      "value": "60"
+                    },
+                    {
+                      "name": "body",
+                      "value": "{\"message\":\"fix: upgrade requests to 2.33.0 for three CVEs\",\"branch\":$config.policy.branch,\"sha\":$branchSource.sha,\"content\":Buffer.from($after,\"utf8\").toString(\"base64\")}"
+                    }
+                  ]
+                },
+                {
+                  "name": "RequireCommit",
+                  "function": "if ($CommitVersionPatch.statusCode!==200 && $CommitVersionPatch.statusCode!==201) throw new Error(\"Patch commit failed\");"
+                }
+              ],
+              "else": []
+            },
+            {
+              "name": "CreateRemediationPR",
+              "action": "system/Common/HTTP/HTTP Request",
+              "inputs": [
+                {
+                  "name": "method",
+                  "value": "\"POST\""
+                },
+                {
+                  "name": "host",
+                  "value": "\"https://api.github.com\""
+                },
+                {
+                  "name": "path",
+                  "value": "\"/repos/\" + $config.repository + \"/pulls\""
+                },
+                {
+                  "name": "headers",
+                  "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"User-Agent\":\"Concert-Patch-Demo\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+                },
+                {
+                  "name": "authKey",
+                  "value": "$config.github_auth"
+                },
+                {
+                  "name": "rejectUnauthorized",
+                  "value": "true"
+                },
+                {
+                  "name": "timeout",
+                  "value": "60"
+                },
+                {
+                  "name": "body",
+                  "value": "{\"title\":\"fix: remediate requests CVEs with 2.33.0\",\"head\":$config.policy.branch,\"base\":\"main\",\"body\":\"Concert Workflows detected requests 2.31.0 in the source inventory. This PR changes only services/langflow-ai-service/requirements.txt to requests 2.33.0.\\n\\nTarget findings: CVE-2024-35195, CVE-2024-47081, CVE-2026-25645.\\n\\nPatch PR verification checks the exact diff, Python dependency resolution, HTTP behavior, service health, source/image vulnerability inventory and CodeQL. Existing unrelated findings remain for triage.\\n\\nReview and merge this PR to run the main build, Concert ingestion, deployment and smoke pipeline. A successful PR or merge alone is not remediation closure; run the Workflows verify operation after that pipeline succeeds.\"}"
+                }
+              ]
+            },
+            {
+              "name": "ReturnCreatedPR",
+              "function": "\nif ($CreateRemediationPR.statusCode!==201) throw new Error(\"PR creation failed\");\nconst pr=typeof $CreateRemediationPR.result===\"string\"?JSON.parse($CreateRemediationPR.result):$CreateRemediationPR.result;\n$result={...$result,status:\"pr_created\",pull_request:pr.html_url,number:pr.number};\n"
+            }
+          ],
+          "else": []
+        }
+      ],
+      "else": []
+    },
+    {
+      "action": "if",
+      "name": "07_VerifyAfterMerge",
+      "condition": "$operation === \"verify\" || ($operation === \"auto\" && $alreadyFixed)",
+      "then": [
+        {
+          "name": "ReadMainRuns",
+          "action": "system/Common/HTTP/HTTP Request",
+          "inputs": [
+            {
+              "name": "method",
+              "value": "\"GET\""
+            },
+            {
+              "name": "host",
+              "value": "\"https://api.github.com\""
+            },
+            {
+              "name": "path",
+              "value": "\"/repos/\" + $config.repository + \"/actions/workflows/concert-devsecops.yml/runs\""
+            },
+            {
+              "name": "headers",
+              "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"User-Agent\":\"Concert-Patch-Demo\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+            },
+            {
+              "name": "authKey",
+              "value": "$config.github_auth"
+            },
+            {
+              "name": "rejectUnauthorized",
+              "value": "true"
+            },
+            {
+              "name": "timeout",
+              "value": "60"
+            },
+            {
+              "name": "query",
+              "value": "{\"branch\":\"main\",\"event\":\"push\",\"per_page\":5}"
+            }
+          ]
+        },
+        {
+          "name": "SelectDeploymentRun",
+          "function": "if ($ReadMainRuns.statusCode!==200) throw new Error(\"Cannot read deployment runs\");\nconst runs=(typeof $ReadMainRuns.result===\"string\"?JSON.parse($ReadMainRuns.result):$ReadMainRuns.result).workflow_runs;\nif (!runs.length) throw new Error(\"No deployment pipeline run\");\n$releaseRun=runs[0];"
+        },
+        {
+          "name": "ReadReleaseSource",
+          "action": "system/Common/HTTP/HTTP Request",
+          "inputs": [
+            {
+              "name": "method",
+              "value": "\"GET\""
+            },
+            {
+              "name": "host",
+              "value": "\"https://api.github.com\""
+            },
+            {
+              "name": "path",
+              "value": "\"/repos/\" + $config.repository + \"/contents/\"+$config.policy.file"
+            },
+            {
+              "name": "headers",
+              "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"User-Agent\":\"Concert-Patch-Demo\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+            },
+            {
+              "name": "authKey",
+              "value": "$config.github_auth"
+            },
+            {
+              "name": "rejectUnauthorized",
+              "value": "true"
+            },
+            {
+              "name": "timeout",
+              "value": "60"
+            },
+            {
+              "name": "query",
+              "value": "{\"ref\":$releaseRun.head_sha}"
+            }
+          ]
+        },
+        {
+          "name": "VerifyDeploymentEvidence",
+          "function": "\nif ($ReadMainRuns.statusCode!==200 || $ReadReleaseSource.statusCode!==200) throw new Error(\"Cannot read deployment pipeline evidence\");\nconst runs=(typeof $ReadMainRuns.result===\"string\"?JSON.parse($ReadMainRuns.result):$ReadMainRuns.result).workflow_runs;\nconst releaseSource=typeof $ReadReleaseSource.result===\"string\"?JSON.parse($ReadReleaseSource.result):$ReadReleaseSource.result;\nconst run=$releaseRun;\nconst inventory=typeof $03_ReadConcertInventory.result===\"string\"?JSON.parse($03_ReadConcertInventory.result):$03_ReadConcertInventory.result;\nconst packages=(inventory.packages||[]).filter(p=>p.name===$config.policy.package);\nconst findings=typeof $02_ReadConcertFindings.result===\"string\"?JSON.parse($02_ReadConcertFindings.result):$02_ReadConcertFindings.result;\nconst open=(findings.cve_findings||[]).filter(f=>f.package_name===$config.policy.package && $config.policy.cves.includes(f.cve) && ![\"Resolved\",\"Fixed\",\"Closed\",\"Not affected\",\"False positive\"].includes(f.assessment_status));\nconst sourceMatchesRelease=releaseSource.sha===$source.sha;\nconst ready=$alreadyFixed && sourceMatchesRelease && run && run.status===\"completed\" && run.conclusion===\"success\" && packages.some(p=>p.version===$config.policy.to_version);\n$result={...$result,status:ready?(open.length?\"deployment_verified_concert_findings_pending\":\"verified\"):\"verification_pending\",pipeline:run?run.html_url:null,\n source_version_verified:$alreadyFixed,source_matches_deployed_release:sourceMatchesRelease,concert_package_versions:[...new Set(packages.map(p=>p.version))],\n remaining_concert_target_rows:open.length,closure:ready && open.length===0?\"verified\":\"not_closed\"};\n"
+        }
+      ],
+      "else": []
+    }
+  ]
+}

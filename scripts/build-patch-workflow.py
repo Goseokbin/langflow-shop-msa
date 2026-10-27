@@ -36,7 +36,7 @@ def build(config):
     concert_path = '$config.application_api + "/source_repos/" + $config.source_repo_id'
     prefix = '"/repos/" + $config.repository'
     blocks = [function('01_ValidatePolicy', r'''
-if (!["plan", "create-pr", "verify"].includes($operation)) throw new Error("Unsupported operation");
+if (!["plan", "create-pr", "verify", "auto"].includes($operation)) throw new Error("Unsupported operation");
 if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test($config.repository)) throw new Error("Invalid repository");
 if ($config.policy.package !== "requests" || $config.policy.to_version !== "2.33.0") throw new Error("Policy is not approved");
 '''), http('02_ReadConcertFindings', '"https://" + $config.concert_host', concert_path + ' + "/cve_findings"', '$config.concert_auth', query='{"page_size":2000}'),
@@ -67,7 +67,7 @@ if (!$alreadyFixed) {
  $after=$before.replace(p.package+"=="+p.from_version,p.package+"=="+p.to_version);
 }
 '''),
-    {'action': 'if', 'name': '06_CreatePRWhenRequested', 'condition': '$operation === "create-pr" && !$alreadyFixed', 'then': [
+    {'action': 'if', 'name': '06_CreatePRWhenRequested', 'condition': '["create-pr","auto"].includes($operation) && !$alreadyFixed', 'then': [
         gh('FindExistingPR', prefix+' + "/pulls"', query='{"state":"open","head":$config.repository.split("/")[0]+":"+$config.policy.branch}'),
         function('CheckExistingPR', '''
 if ($FindExistingPR.statusCode!==200) throw new Error("Cannot read existing PRs");
@@ -97,28 +97,30 @@ if ($CreateRemediationPR.statusCode!==201) throw new Error("PR creation failed")
 const pr=typeof $CreateRemediationPR.result==="string"?JSON.parse($CreateRemediationPR.result):$CreateRemediationPR.result;
 $result={...$result,status:"pr_created",pull_request:pr.html_url,number:pr.number};
 ''')], 'else': []}], 'else': []},
-    {'action':'if','name':'07_VerifyAfterMerge','condition':'$operation === "verify"','then':[
+    {'action':'if','name':'07_VerifyAfterMerge','condition':'$operation === "verify" || ($operation === "auto" && $alreadyFixed)','then':[
         gh('ReadMainRuns',prefix+' + "/actions/workflows/concert-devsecops.yml/runs"',query='{"branch":"main","event":"push","per_page":5}'),
-        gh('ReadCurrentMain',prefix+' + "/git/ref/heads/main"'),
+        function('SelectDeploymentRun', 'if ($ReadMainRuns.statusCode!==200) throw new Error("Cannot read deployment runs");\nconst runs=(typeof $ReadMainRuns.result==="string"?JSON.parse($ReadMainRuns.result):$ReadMainRuns.result).workflow_runs;\nif (!runs.length) throw new Error("No deployment pipeline run");\n$releaseRun=runs[0];'),
+        gh('ReadReleaseSource',prefix+' + "/contents/"+$config.policy.file',query='{"ref":$releaseRun.head_sha}'),
         function('VerifyDeploymentEvidence', '''
-if ($ReadMainRuns.statusCode!==200 || $ReadCurrentMain.statusCode!==200) throw new Error("Cannot read deployment pipeline evidence");
+if ($ReadMainRuns.statusCode!==200 || $ReadReleaseSource.statusCode!==200) throw new Error("Cannot read deployment pipeline evidence");
 const runs=(typeof $ReadMainRuns.result==="string"?JSON.parse($ReadMainRuns.result):$ReadMainRuns.result).workflow_runs;
-const main=typeof $ReadCurrentMain.result==="string"?JSON.parse($ReadCurrentMain.result):$ReadCurrentMain.result;
-const run=runs.find(r=>r.head_sha===main.object.sha);
+const releaseSource=typeof $ReadReleaseSource.result==="string"?JSON.parse($ReadReleaseSource.result):$ReadReleaseSource.result;
+const run=$releaseRun;
 const inventory=typeof $03_ReadConcertInventory.result==="string"?JSON.parse($03_ReadConcertInventory.result):$03_ReadConcertInventory.result;
 const packages=(inventory.packages||[]).filter(p=>p.name===$config.policy.package);
 const findings=typeof $02_ReadConcertFindings.result==="string"?JSON.parse($02_ReadConcertFindings.result):$02_ReadConcertFindings.result;
 const open=(findings.cve_findings||[]).filter(f=>f.package_name===$config.policy.package && $config.policy.cves.includes(f.cve) && !["Resolved","Fixed","Closed","Not affected","False positive"].includes(f.assessment_status));
-const ready=$alreadyFixed && run && run.status==="completed" && run.conclusion==="success" && packages.some(p=>p.version===$config.policy.to_version);
+const sourceMatchesRelease=releaseSource.sha===$source.sha;
+const ready=$alreadyFixed && sourceMatchesRelease && run && run.status==="completed" && run.conclusion==="success" && packages.some(p=>p.version===$config.policy.to_version);
 $result={...$result,status:ready?(open.length?"deployment_verified_concert_findings_pending":"verified"):"verification_pending",pipeline:run?run.html_url:null,
- source_version_verified:$alreadyFixed,concert_package_versions:[...new Set(packages.map(p=>p.version))],
+ source_version_verified:$alreadyFixed,source_matches_deployed_release:sourceMatchesRelease,concert_package_versions:[...new Set(packages.map(p=>p.version))],
  remaining_concert_target_rows:open.length,closure:ready && open.length===0?"verified":"not_closed"};
 ''')], 'else': []}]
     return {'name':'Langflow Package Patch Demo','platform':'node',
         'meta':{'version':5,'layout':'flow','workerGroup':'default','description':'Plan → constrained package patch PR → PR checks → review/merge → existing deployment pipeline → evidence verification. No automatic merge.'},
-        'variables':[variable('operation','"plan"',isInput=True,type={'type':'string','enum':['plan','create-pr','verify']}),
+        'variables':[variable('operation','"plan"',isInput=True,type={'type':'string','enum':['plan','create-pr','verify','auto']}),
             variable('config',json.dumps(cfg)),variable('result','{}',isOutput=True)]+
-            [variable(n) for n in ['source','before','after','evidence','alreadyFixed','existing','main','branchSource','needsCommit']],
+            [variable(n) for n in ['source','before','after','evidence','alreadyFixed','existing','main','branchSource','needsCommit','releaseRun']],
         'blocks':blocks}
 
 
