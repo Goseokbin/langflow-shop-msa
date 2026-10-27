@@ -54,18 +54,24 @@ def collect(work):
 
 def verify(client,api,work):
     summary=json.loads((work/'output/sast-scan.json').read_text())
+    manifest=json.loads((work/'source-manifest.json').read_text())
+    repositories=client.request(api.APP+'/source_repos?page_size=2000')['source_repos']
+    repository=next(r for r in repositories if r['repo_url'].removesuffix('.git')==manifest['repository'] and r.get('branch')==manifest['branch'])
     deadline=time.monotonic()+180
     while True:
         response=client.request(api.APP+'/exposures?show_unique=true&page_size=2000')
         (work/'output/sast-concert-exposures.json').write_text(json.dumps(response,ensure_ascii=False,indent=2))
+        repo_response=client.request(api.APP+'/source_repos/'+repository['id']+'/exposures?show_unique=true&page_size=2000')
+        (work/'output/sast-concert-repository.json').write_text(json.dumps(repo_response,ensure_ascii=False,indent=2))
         serialized=json.dumps(response)
-        missing=[rule for rule in summary['rules'] if rule not in serialized]
+        repo_serialized=json.dumps(repo_response)
+        missing=[rule for rule in summary['rules'] if rule not in serialized or rule not in repo_serialized]
         if not missing:break
         if time.monotonic()>deadline:raise RuntimeError('Concert SAST rules not linked: '+', '.join(missing))
         time.sleep(5)
     result={'source_findings':summary['finding_count'],'source_rules':summary['rules'],'matched_rules':len(summary['rules'])-len(missing),
             'concert_rule_groups':response.get('pagination',{}).get('total_count',len(response.get('exposures',[]))),
-            'application_verified':True,'scope':'services/','query_suite':'security-extended'}
+            'application_verified':True,'repository_verified':True,'repository_rule_groups':repo_response.get('pagination',{}).get('total_count',0),'scope':'services/','query_suite':'security-extended'}
     (work/'output/sast-verification.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
     return result
 
