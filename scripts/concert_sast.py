@@ -50,13 +50,50 @@ def normalize_sarif(document):
     return result
 
 
+def merge_sarif(documents):
+    """Keep one repository scan snapshot, preserving all real language results."""
+    first=documents[0]['runs'][0]
+    driver=copy.deepcopy(first['tool']['driver']);rules={};results=[];invocations=[]
+    for document in documents:
+        normalized=normalize_sarif(document)
+        for run in normalized['runs']:
+            for rule in run['tool']['driver']['rules']:rules[rule['id']]=rule
+            artifacts=run.get('artifacts',[])
+            invocation_offset=len(invocations);invocations.extend(copy.deepcopy(run.get('invocations',[])))
+            def expand_artifact_references(node):
+                if isinstance(node,list):
+                    for item in node:expand_artifact_references(item)
+                elif isinstance(node,dict):
+                    if isinstance(node.get('artifactLocation'),dict):
+                        loc=node['artifactLocation'];index=loc.get('index')
+                        if 'uri' not in loc and index is not None:loc.update(artifacts[index]['location'])
+                        loc.pop('index',None)
+                    for value in node.values():expand_artifact_references(value)
+            for finding in copy.deepcopy(run.get('results',[])):
+                expand_artifact_references(finding)
+                provenance=finding.get('provenance',{})
+                if 'invocationIndex' in provenance:provenance['invocationIndex']+=invocation_offset
+                results.append(finding)
+    driver['rules']=list(rules.values());indices={key:i for i,key in enumerate(rules)}
+    for finding in results:
+        rule=finding['ruleId'];finding['ruleIndex']=indices[rule];finding['rule']={'id':rule,'index':indices[rule]}
+    run={'tool':{'driver':driver},'results':results,'invocations':invocations}
+    for key in ['versionControlProvenance','taxonomies','columnKind']:
+        if key in first:run[key]=copy.deepcopy(first[key])
+    merged={'version':'2.1.0','$schema':'https://json.schemastore.org/sarif-2.1.0.json','runs':[run]}
+    before=[finding for doc in documents for finding in summarize_sarif(doc)['findings']]
+    if summarize_sarif(merged)['findings']!=before:raise ValueError('SARIF merge changed actual findings')
+    return merged
+
+
 def collect(work):
     destination=work/'output/sast';destination.mkdir(parents=True,exist_ok=True)
     files=sorted((work/'codeql-results').glob('*.sarif'))
     if len(files)!=2:raise ValueError(f'Expected Python and JavaScript SARIF, got {len(files)}')
-    analyses=[]
+    analyses=[];documents=[]
     for file in files:
-        row=summarize_sarif(json.loads(file.read_text()))
+        document=json.loads(file.read_text());documents.append(document)
+        row=summarize_sarif(document)
         if 'python' not in file.stem and 'javascript' not in file.stem:raise ValueError('Unexpected CodeQL language report')
         raw=destination/'original';raw.mkdir(exist_ok=True);shutil.copy2(file,raw/file.name)
         normalized=normalize_sarif(json.loads(file.read_text()))
@@ -65,7 +102,8 @@ def collect(work):
         analyses.append({'language':file.stem,'file':target.name,**row})
     if not any('python' in a['language'] for a in analyses) or not any('javascript' in a['language'] for a in analyses):
         raise ValueError('Both Python and JavaScript/TypeScript analyses must complete')
-    summary={'analyses':analyses,'finding_count':sum(a['finding_count'] for a in analyses),
+    (destination/'codeql.json').write_text(json.dumps(merge_sarif(documents)))
+    summary={'merged_file':'codeql.json','analyses':analyses,'finding_count':sum(a['finding_count'] for a in analyses),
              'rules':sorted({r for a in analyses for r in a['rules']}),'scope':'services/','query_suite':'security-extended'}
     (work/'output/sast-scan.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
     return summary
@@ -100,6 +138,5 @@ def ingest(work,manifest,stages,authorization):
     metadata={'repo_url':manifest['repository'],'repo_name':manifest['repo_name'],'branch':manifest['branch'],'branch_name':manifest['branch'],
               'scanner_name':'CodeQL','application_name':'langflow-shop','application_version':'1.0.0'}
     client=stages.api.Concert(authorization=authorization)
-    for analysis in summary['analyses']:
-        stages.upload(client,work/'output/sast'/analysis['file'],'static_code_scan',metadata)
+    stages.upload(client,work/'output/sast'/summary['merged_file'],'static_code_scan',metadata)
     return verify(client,stages.api,work)

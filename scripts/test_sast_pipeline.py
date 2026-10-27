@@ -1,6 +1,6 @@
 import copy
 import unittest
-from concert_sast import summarize_sarif, normalize_sarif
+from concert_sast import summarize_sarif, normalize_sarif, merge_sarif
 
 class SastBoundaryTests(unittest.TestCase):
     def doc(self):
@@ -26,6 +26,13 @@ class SastBoundaryTests(unittest.TestCase):
         self.assertEqual(summarize_sarif(normalized)['findings'],summarize_sarif(data)['findings'])
         self.assertEqual(normalized['runs'][0]['tool']['driver']['rules'],rules)
         self.assertEqual(data,before)
+    def test_language_merge_preserves_both_rule_ids_and_source_locations(self):
+        python=self.doc();javascript=self.doc();javascript['runs'][0]['tool']['driver']['rules'][0]['id']='js/test-rule'
+        result=javascript['runs'][0]['results'][0];result['ruleId']='js/test-rule';result['locations'][0]['physicalLocation']['artifactLocation']['uri']='services/test.ts'
+        merged=merge_sarif([python,javascript]);summary=summarize_sarif(merged)
+        self.assertEqual(len(merged['runs']),1);self.assertEqual(summary['finding_count'],2)
+        self.assertEqual(summary['rules'],['js/test-rule','py/test-rule'])
+        self.assertEqual(summary['findings'][1]['locations'],[{'file':'services/test.ts','line':7}])
     def test_successful_zero_finding_analysis_remains_zero(self):
         data=self.doc();data['runs'][0]['results']=[]
         self.assertEqual(summarize_sarif(data)['finding_count'],0)
