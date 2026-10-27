@@ -44,3 +44,11 @@ Actions → Langflow shop DevSecOps → 최신 실행 → Summary에서 8개 job
 각 job은 서로 다른 runner다. 원본 스캔 결과와 작업 상태는 PIPELINE_STATE_KEY Repository Secret으로 암호화하고 HMAC 무결성 검증 후 다음 job에 전달한다. 키는 초기 구성 때 생성하며 공개 코드·로그·artifact에 저장하지 않는다. private-state-* artifact는 암호문으로 1일 보관한다. 데모에서는 demo-* 보고서를 사용한다. 인증 파일과 Trivy 캐시는 job 간 전달하지 않는다. 각 runner가 같은 run ID·commit·소스 해시를 다시 검증한다.
 
 공개 요약에는 집계와 이미지 digest를 기록하며 원본 SBOM과 상세 내부 레지스트리 위치는 보호된 상태에 둔다. 저장소 CVE 발견 행의 반복 표시는 이전 실습에서 확인된 제한이므로 발견 행 수와 고유 CVE·패키지·버전 조합 수를 구분한다. AI 크레딧·PostgreSQL 분석 범위·감사 모드 제한도 그대로 적용된다.
+
+## CodeQL SAST 추가
+
+현재 workflow는 준비 → 소스 SCA → CodeQL SAST → Concert SAST 업로드·검증 → 이미지 빌드 → 이미지 Trivy → Concert CVE 업로드 → 배포 → 연결 검증 → 기능 검증의 10개 job이다. 기존 8단계 설명은 이전 실행 기준이다.
+
+03 CodeQL은 services/ 아래 Python과 JavaScript/TypeScript를 security-extended 쿼리로 분석한다. 원본 SARIF 두 파일을 보호된 job 상태에 보관하며 발견 규칙·파일·줄 번호·심각도는 demo-sast-scan 보고서에 표시한다. 04는 static_code_scan으로 동일한 repo URL·앱 버전에 업로드하고 processing_completed 및 실제 Concert 노출 규칙을 대조한다. 09 연결 검증에서 다시 확인해 후속 application/deploy 수집 후에도 유지되는지 검사한다.
+
+CodeQL action은 고정 commit을 사용하고 해당 job에만 security-events:write 권한을 부여한다. SARIF와 CodeQL DB를 GitHub Code Scanning 서비스에 별도로 업로드하지 않으며, 이번 대상은 Concert다. 원본 SARIF를 수정해 발견 항목을 만들거나 0건 결과를 보완하지 않는다. 분석 실패는 파이프라인 실패이며 정상 분석 0건과 구분한다. CVE와 SAST 모두 발견 항목 수 자체로 차단하는 정책은 아직 없는 감사 모드다.

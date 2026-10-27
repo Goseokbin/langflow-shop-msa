@@ -1,0 +1,5 @@
+name: Langflow shop application security
+paths:
+  - services
+queries:
+  - uses: security-extended

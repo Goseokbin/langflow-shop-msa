@@ -45,6 +45,19 @@ runs:
       if: inputs.previous != ''
       shell: bash
       run: python3 scripts/pipeline-workspace.py restore .runtime/incoming-state/state.enc
+    - name: Initialize CodeQL for Python and JavaScript/TypeScript
+      if: inputs.stage == 'sast-scan'
+      uses: github/codeql-action/init@793b778da9c9275a0f276522b27cb5fc14bba279
+      with:
+        languages: python,javascript-typescript
+        config-file: .github/codeql/codeql-config.yml
+    - name: Analyze source and generate original SARIF
+      if: inputs.stage == 'sast-scan'
+      uses: github/codeql-action/analyze@793b778da9c9275a0f276522b27cb5fc14bba279
+      with:
+        output: .runtime/github-actions/codeql-results
+        upload: never
+        upload-database: false
     - name: Run stage — ${{ inputs.stage }}
       id: execute
       shell: bash

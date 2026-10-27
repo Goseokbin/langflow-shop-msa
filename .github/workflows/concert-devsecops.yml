@@ -2,7 +2,7 @@ name: Langflow shop DevSecOps
 on:
   push:
     branches: [main]
-    paths: ['services/**', 'scripts/**', 'openshift/**', '.github/actions/**', '.github/workflows/concert-devsecops.yml']
+    paths: ['services/**', 'scripts/**', 'openshift/**', '.github/actions/**', '.github/codeql/**', '.github/workflows/concert-devsecops.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -36,9 +36,34 @@ jobs:
         with:
           stage: source-scan
           previous: prepare
-  build:
-    name: 03 · 이미지 빌드 · Push
+  sast_scan:
+    name: 03 · CodeQL SAST 분석
     needs: source_scan
+    permissions:
+      contents: read
+      security-events: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: ./.github/actions/devsecops-stage
+        with:
+          stage: sast-scan
+          previous: source-scan
+  sast_ingest:
+    name: 04 · Concert SAST 업로드 · 검증
+    needs: sast_scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: ./.github/actions/devsecops-stage
+        with:
+          stage: sast-ingest
+          previous: sast-scan
+  build:
+    name: 05 · 이미지 빌드 · Push
+    needs: sast_ingest
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -46,9 +71,9 @@ jobs:
       - uses: ./.github/actions/devsecops-stage
         with:
           stage: build
-          previous: source-scan
+          previous: sast-ingest
   image_scan:
-    name: 04 · 이미지 Trivy 스캔
+    name: 06 · 이미지 Trivy 스캔
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -59,7 +84,7 @@ jobs:
           stage: image-scan
           previous: build
   concert_ingest:
-    name: 05 · Concert 업로드
+    name: 07 · Concert CVE 업로드
     needs: image_scan
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -70,7 +95,7 @@ jobs:
           stage: concert-ingest
           previous: image-scan
   deploy:
-    name: 06 · OpenShift 배포
+    name: 08 · OpenShift 배포
     needs: concert_ingest
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -81,7 +106,7 @@ jobs:
           stage: deploy
           previous: concert-ingest
   link_verify:
-    name: 07 · Concert 연결 검증
+    name: 09 · Concert 연결 검증
     needs: deploy
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -92,7 +117,7 @@ jobs:
           stage: link-verify
           previous: deploy
   smoke:
-    name: 08 · 쇼핑몰 기능 검증
+    name: 10 · 쇼핑몰 기능 검증
     needs: link_verify
     runs-on: ubuntu-24.04
     timeout-minutes: 30

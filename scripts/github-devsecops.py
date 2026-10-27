@@ -13,8 +13,8 @@ import tarfile
 
 ROOT=Path(__file__).resolve().parents[1]
 WORK=ROOT/'.runtime/github-actions'
-STAGES=['prepare','source-scan','build','image-scan','concert-ingest','deploy','link-verify','smoke']
-TITLES=['01 준비 · 소스 고정','02 소스 패키지 · CVE 스캔','03 이미지 7개 빌드 · Push','04 이미지 9개 Trivy 스캔','05 Concert 결과 업로드','06 OpenShift 배포','07 저장소 · 이미지 · 배포 연결 검증','08 쇼핑몰 기능 검증']
+STAGES=['prepare','source-scan','sast-scan','sast-ingest','build','image-scan','concert-ingest','deploy','link-verify','smoke']
+TITLES=['01 준비 · 소스 고정','02 소스 패키지 · CVE 스캔','03 CodeQL SAST 분석','04 Concert SAST 업로드 · 검증','05 이미지 7개 빌드 · Push','06 이미지 9개 Trivy 스캔','07 Concert CVE 업로드','08 OpenShift 배포','09 저장소 · 이미지 · 배포 연결 검증','10 쇼핑몰 기능 검증']
 
 
 def output(*args,**kwargs):return subprocess.check_output(args,text=True,**kwargs).strip()
@@ -104,7 +104,7 @@ def smoke(stages,manifest):
     verification=read('verification.json')
     public={'run_url':run_url(),'git_commit':manifest['git_base_commit'],'source_snapshot_sha256':manifest['archive_sha256'],
             'repository':verification['repository'],'images':[{k:v for k,v in row.items() if k in ['name','packages','cves','os_unsupported']} for row in verification['images']],
-            'topology_counts':verification['topology_counts'],'commerce_smoke':'passed','oci_revision_verified_images':len(read('builds.json',[]))}
+            'topology_counts':verification['topology_counts'],'sast':read('sast-verification.json'),'commerce_smoke':'passed','oci_revision_verified_images':len(read('builds.json',[]))}
     stages.save('public-verification.json',public)
     stages.event('smoke','succeeded',checks=len(result['results']))
 
@@ -129,6 +129,15 @@ def report(stage,outcome):
         purls=sorted({c['purl'] for c in doc.get('components',[]) if c.get('purl') and c.get('type')!='operating-system'})
         data.update({'packages':scan['packages'],'trivy_advisories':scan['vulnerabilities'],'python_packages':sum(x.startswith('pkg:pypi/') for x in purls),'npm_packages':sum(x.startswith('pkg:npm/') for x in purls),'package_purls':purls})
         text += [table(['검사 대상','수집 수'],[['Python 패키지',data['python_packages']],['npm 패키지',data['npm_packages']],['전체 고유 패키지',scan['packages']],['Trivy advisory 항목',scan['vulnerabilities']]]),'소스 의존성 검사 결과입니다. OS·Python 전이 의존성은 04 이미지 스캔에서 보완합니다.']
+    elif stage=='sast-scan' and read('sast-scan.json'):
+        d=read('sast-scan.json');data['sast']=d
+        text += [table(['분석 언어','CodeQL 발견 항목','규칙 수'],[[a['language'],a['finding_count'],len(a['rules'])] for a in d['analyses']]),'검사 범위: services/ · security-extended. 실제 CodeQL SARIF 결과이며 CVE 검사와 별개입니다.']
+        findings=[f for a in d['analyses'] for f in a['findings']]
+        if findings:text += [table(['CodeQL 규칙','파일','줄','심각도'],[[f['rule_id'],f['locations'][0]['file'],f['locations'][0]['line'],f['severity']] for f in findings])]
+        else:text += ['이 규칙 집합에서 발견 항목 0개입니다. 분석 미실행이나 전체 코드 안전 판정을 뜻하지 않습니다.']
+    elif stage=='sast-ingest' and read('sast-verification.json'):
+        data['sast']=read('sast-verification.json')
+        text += [table(['Concert SAST 확인 항목','결과'],data['sast'].items()),'확인 위치: Concert → langflow-shop 1.0.0 → 노출, 또는 저장소 → SAST 노출. static_code_scan 업로드 처리 완료 후 실제 규칙 ID를 대조합니다.']
     elif stage=='build' and read('builds.json'):
         data['images']=[{'service':b['name'],'digest':b['image'].rsplit('@',1)[1],'commit':b['git_commit'],'oci_labels_verified':True} for b in read('builds.json')]
         text += [table(['서비스','빌드 이미지 digest','소스 label'],[[b['service'],'`'+b['digest']+'`','검증 통과'] for b in data['images']]),'Push한 digest가 스캔·배포까지 유지됩니다.']
@@ -163,7 +172,13 @@ def execute(stage):
     manifest,auth,stages=context()
     try:
         stages.prepare()  # Source and run identity is checked in every job.
-        if stage=='build':build_images(manifest,stages)
+        if stage=='sast-scan':
+            import concert_sast
+            result=concert_sast.collect(WORK);stages.event(stage,'succeeded',findings=result['finding_count'])
+        elif stage=='sast-ingest':
+            import concert_sast
+            result=concert_sast.ingest(WORK,manifest,stages,auth);stages.event(stage,'succeeded',findings=result['source_findings'])
+        elif stage=='build':build_images(manifest,stages)
         elif stage=='smoke':smoke(stages,manifest)
         elif stage!='prepare':
             {'source-scan':stages.source_scan,'image-scan':stages.image_scan,'concert-ingest':stages.ingest,'deploy':stages.deploy,'link-verify':stages.link_verify}[stage]()
@@ -175,6 +190,8 @@ def execute(stage):
                 rows.append({'name':built['name'],'digest':image.rsplit('@',1)[1],'ready':d['status']['readyReplicas']})
             stages.save('deployment-verification.json',rows)
         if stage=='link-verify':
+            import concert_sast
+            concert_sast.verify(stages.api.Concert(authorization=auth),stages.api,WORK)
             client=stages.api.Concert(authorization=auth);d=read('verification.json');repoid=d['repository']['id']
             findings=client.request(stages.api.APP+'/source_repos/'+repoid+'/cve_findings?page_size=2000')['cve_findings']
             d['repository']['unique_cve_package_version_combinations']=len({(r['cve'],r['package_name'],r['package_version']) for r in findings})
