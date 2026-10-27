@@ -84,7 +84,7 @@ Artifacts의 `patch-verification`에서 원본 소스·이미지 Trivy 결과와
 
 여기서 `closure`는 **이 커스텀 Workflow의 검증 결과**다. Concert의 Action center 조치 상태를 강제로 변경하거나 전체 앱의 보안 문제 해결을 선언하지 않는다. 남은 finding을 숨기려고 `False positive`로 바꾸지 않는다.
 
-Workflows → 작업 → 작업 작성에서 해당 워크플로우, 최신 버전, `operation=auto`, 시간별 반복을 선택하고 **작업 사용**을 켠다. 테스트 배포 완료 후에도 같은 정책을 정기 확인한다. 중지하려면 이 작업의 Enabled를 끈다. 정책 외의 새 CVE는 자동 변경하지 않는다.
+Workflows → 작업 → 작업 작성에서 해당 워크플로우, 최신 버전, `operation=auto`, 시간별 반복을 선택하고 **작업 사용**을 켠다. 테스트 배포 완료 후에도 같은 정책을 정기 확인한다. 중지하려면 이 작업의 Enabled를 끈다. 정책 외의 새 CVE는 자동 변경하지 않는다. 시간별 작업은 수집된 Concert·GitHub 증거를 재확인하며, 새 CVE 탐지와 배포 드리프트 확인에는 최신 스캔·클러스터 수집도 필요하다.
 
 ## 문제를 구분하는 방법
 
@@ -94,3 +94,12 @@ Workflows → 작업 → 작업 작성에서 해당 워크플로우, 최신 버�
 - 배포 전인데 코드만 수정됨: `verification_pending`이 정상이다.
 - Concert에 옛 finding이 남음: 현재 이미지 digest, 패키지 버전, scan 시각을 확인하고 과거 finding과 구분한다.
 - 데모를 다시 보여주고 싶음: 테스트 버전을 새 앱/환경으로 복제한다. 현재 배포를 취약 버전으로 자동 되돌리지는 않는다.
+
+## 실제 실행 증거
+
+- Workflows가 만든 [PR #1](https://github.com/Goseokbin/langflow-shop-msa/pull/1): requirements 한 줄 변경, 재실행 시 기존 PR 재사용.
+- [PR 검사](https://github.com/Goseokbin/langflow-shop-msa/actions/runs/40484138957): 3단계 통과.
+- [병합 후 배포](https://github.com/Goseokbin/langflow-shop-msa/actions/runs/40484399389): 10단계 및 쇼핑몰 기능 8개 통과.
+- 실행 중인 AI 서비스에서 requests 2.33.0과 해당 빌드 digest를 확인했다. Concert 저장소와 새 AI 서비스 이미지의 대상 CVE finding은 0건이며, Workflows는 `verified / closure=verified`를 반환했다.
+- 이전 2.31.0 패키지 기록은 Concert 목록에 남는다. 실제 배포 이미지와 최신 스캔을 함께 확인한다. 다른 CVE와 SAST 발견 사항은 이번 패치 범위에 포함하지 않았다.
+- 이미 수정된 main에서 `plan`을 실행하면 `source_already_patched`가 정상이다. 기존 PR과 실행 기록으로 시연하고, 새 실습에는 별도의 테스트 앱·환경을 사용한다.
