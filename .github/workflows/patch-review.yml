@@ -1,0 +1,106 @@
+name: Patch PR verification
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: patch-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  scope:
+    name: 01 · 패치 변경 범위
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate allowlisted version change
+        if: startsWith(github.head_ref, 'concert-patch/')
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 scripts/verify-patch.py diff "$BASE_SHA"
+      - name: Verify policy guards
+        run: python3 -m unittest discover -s scripts -p 'test_patch_pipeline.py' -v
+  scan_build:
+    name: 02 · 패키지 · 이미지 검사
+    needs: scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Install pinned Trivy
+        run: |
+          mkdir -p "$RUNNER_TEMP/patch-tools"
+          curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_Linux-64bit.tar.gz -o "$RUNNER_TEMP/trivy.tgz"
+          tar -xzf "$RUNNER_TEMP/trivy.tgz" -C "$RUNNER_TEMP/patch-tools" trivy
+          echo "$RUNNER_TEMP/patch-tools" >> "$GITHUB_PATH"
+      - name: Scan source and confirm target CVEs removed
+        run: |
+          mkdir -p .runtime/patch-review
+          trivy fs --scanners vuln --list-all-pkgs --format json --output .runtime/patch-review/source.json services
+          python3 scripts/verify-patch.py scan .runtime/patch-review/source.json > .runtime/patch-review/source-gate.json
+      - name: Resolve dependencies and build patched service
+        run: docker build -t patch-review:local services/langflow-ai-service
+      - name: Dependency and HTTP client regression checks
+        run: |
+          docker run --rm patch-review:local python -m pip check
+          docker run --rm patch-review:local python -c 'import requests; assert requests.__version__ == "2.33.0"'
+          docker run --rm -i patch-review:local python < scripts/requests-regression.py
+      - name: Start service and check health
+        run: |
+          docker run -d --name patch-app -p 8005:8005 patch-review:local
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:8005/health > .runtime/patch-review/health.json; then exit 0; fi
+            sleep 2
+          done
+          docker logs patch-app
+          exit 1
+      - name: Scan built image and confirm target CVEs removed
+        run: |
+          trivy image --image-src docker --scanners vuln --list-all-pkgs --format json --output .runtime/patch-review/image.json patch-review:local
+          python3 scripts/verify-patch.py scan .runtime/patch-review/image.json > .runtime/patch-review/image-gate.json
+          cat .runtime/patch-review/source-gate.json .runtime/patch-review/image-gate.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        if: always()
+        with:
+          name: patch-verification
+          path: .runtime/patch-review/
+          retention-days: 14
+  sast:
+    name: 03 · CodeQL SAST
+    needs: scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@793b778da9c9275a0f276522b27cb5fc14bba279
+        with:
+          languages: python,javascript-typescript
+          config-file: .github/codeql/codeql-config.yml
+      - uses: github/codeql-action/analyze@793b778da9c9275a0f276522b27cb5fc14bba279
+        with:
+          upload: never
+          upload-database: false
+          output: .runtime/patch-sast
+      - name: Verify successful SARIF analyses
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys
+          sys.path.insert(0, 'scripts')
+          import concert_sast
+          files = list(pathlib.Path('.runtime/patch-sast').glob('*.sarif'))
+          assert len(files) == 2, 'Both CodeQL languages must be analyzed'
+          for p in files:
+              concert_sast.summarize_sarif(__import__('json').loads(p.read_text()))
+          PY
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: patch-sast
+          path: .runtime/patch-sast/
+          retention-days: 14

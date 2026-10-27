@@ -1,0 +1,8 @@
+{
+  "repository": "OWNER/REPOSITORY",
+  "concert_host": "CONCERT_HOST_WITHOUT_PROTOCOL",
+  "application_api": "/concert/core/api/v2/applications/APP_ID/versions/VERSION_ID",
+  "source_repo_id": "SOURCE_REPOSITORY_BRANCH_ID",
+  "github_auth": "USERNAME/GitHubPatchAuth",
+  "concert_auth": "USERNAME/ConcertPatchAuth"
+}

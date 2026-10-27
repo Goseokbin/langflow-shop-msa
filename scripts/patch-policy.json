@@ -1,0 +1,9 @@
+{
+  "package": "requests",
+  "from_version": "2.31.0",
+  "to_version": "2.33.0",
+  "file": "services/langflow-ai-service/requirements.txt",
+  "service": "langflow-ai-service",
+  "branch": "concert-patch/requests-2.33.0",
+  "cves": ["CVE-2024-35195", "CVE-2024-47081", "CVE-2026-25645"]
+}

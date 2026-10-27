@@ -123,6 +123,16 @@ def image_scan():
     results=[]
     for name,image in sorted(images.items(),key=lambda x:x[0]=='langflow'):
         print('Scanning image '+name,flush=True);result=scan(name,image);results.append(result);save('image-scans.json',results)
+    # A patched release must prove the target CVEs absent in both source and its new image.
+    policy_path=ROOT/'scripts/patch-policy.json'
+    if policy_path.exists():
+        policy=json.loads(policy_path.read_text())
+        if (policy['package']+'=='+policy['to_version']) in (ROOT/policy['file']).read_text().splitlines():
+            patch_spec=importlib.util.spec_from_file_location('patch_guard',ROOT/'scripts/verify-patch.py')
+            patch_guard=importlib.util.module_from_spec(patch_spec);patch_spec.loader.exec_module(patch_guard)
+            gates={name:patch_guard.validate_scan(json.loads((OUT/(name+'.trivy.json')).read_text()))
+                   for name in ['repository',policy['service']]}
+            save('patch-verification.json',gates)
     event('image-scan','succeeded',images=len(results),unsupported_os=[r['name'] for r in results if r['os_unsupported']])
 
 
