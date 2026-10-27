@@ -1,0 +1,35 @@
+{
+  "environment": "langflow-shop-test",
+  "environment_id": "REPLACE_WITH_ENVIRONMENT_ID",
+  "namespace": "shopping-mall",
+  "cluster": "YOUR_CLUSTER",
+  "concert_host": "concert.example.com",
+  "upload_auth": "YOUR_USER/CertificateConcert",
+  "read_auth": "YOUR_USER/ConcertAPIKey",
+  "targets": [
+    {
+      "host": "frontend.apps.example.com",
+      "port": 443,
+      "route": "frontend",
+      "demo": false
+    },
+    {
+      "host": "api-gateway.apps.example.com",
+      "port": 443,
+      "route": "api-gateway",
+      "demo": false
+    },
+    {
+      "host": "langflow.apps.example.com",
+      "port": 443,
+      "route": "langflow",
+      "demo": false
+    },
+    {
+      "host": "certificate-demo.apps.example.com",
+      "port": 443,
+      "route": "certificate-demo",
+      "demo": true
+    }
+  ]
+}

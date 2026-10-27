@@ -126,6 +126,10 @@ def main():
             d['dependsOn']=[r for r in d['dependsOn'] if r not in {'service:'+n for n in managed_public}]
     for route in routes:
         name=route['metadata']['name'];target=route['spec']['to']['name']
+        # The isolated certificate lab is inventoried by its dedicated certificate workflow.
+        # Keep it out of the production app's three managed public services.
+        if name=='certificate-demo' and target=='frontend' and route['metadata'].get('labels',{}).get('langflow-shop.dev/certificate-demo')=='true':
+            continue
         if name not in {'frontend','api-gateway','langflow'} or target!=name:
             raise ValueError('Review unexpected Route target: '+name)
         if not any(c.get('type')=='Admitted' and c.get('status')=='True' for ing in route.get('status',{}).get('ingress',[]) for c in ing.get('conditions',[])):

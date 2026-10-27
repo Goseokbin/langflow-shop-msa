@@ -1,0 +1,299 @@
+{
+  "name": "Langflow Certificate Inventory",
+  "platform": "node",
+  "meta": {
+    "version": 5,
+    "layout": "flow",
+    "workerGroup": "default",
+    "description": "Read public TLS certificates from explicit HTTPS routes, deduplicate shared certificates, ingest into Concert and verify inventory. No keys or certificate rotation."
+  },
+  "variables": [
+    {
+      "name": "config",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "{\"environment\": \"langflow-shop-test\", \"environment_id\": \"REPLACE_WITH_ENVIRONMENT_ID\", \"namespace\": \"shopping-mall\", \"cluster\": \"YOUR_CLUSTER\", \"concert_host\": \"concert.example.com\", \"upload_auth\": \"YOUR_USER/CertificateConcert\", \"read_auth\": \"YOUR_USER/ConcertAPIKey\", \"targets\": [{\"host\": \"frontend.apps.example.com\", \"port\": 443, \"route\": \"frontend\", \"demo\": false}, {\"host\": \"api-gateway.apps.example.com\", \"port\": 443, \"route\": \"api-gateway\", \"demo\": false}, {\"host\": \"langflow.apps.example.com\", \"port\": 443, \"route\": \"langflow\", \"demo\": false}, {\"host\": \"certificate-demo.apps.example.com\", \"port\": 443, \"route\": \"certificate-demo\", \"demo\": true}]}"
+    },
+    {
+      "name": "result",
+      "isInput": false,
+      "isOutput": true,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "{}"
+    },
+    {
+      "name": "certificates",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "{}"
+    },
+    {
+      "name": "observations",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "[]"
+    },
+    {
+      "name": "certificatePem",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "\"\""
+    },
+    {
+      "name": "signatureAlgorithm",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "\"\""
+    },
+    {
+      "name": "attempts",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "0"
+    },
+    {
+      "name": "ingestionComplete",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "false"
+    },
+    {
+      "name": "document",
+      "isInput": false,
+      "isOutput": false,
+      "required": false,
+      "level": "INTERMEDIATE",
+      "type": {
+        "type": "any"
+      },
+      "value": "{}"
+    }
+  ],
+  "blocks": [
+    {
+      "action": "foreach",
+      "name": "ForEachTarget",
+      "list": "$config.targets",
+      "blocks": [
+        {
+          "name": "ReadTLS",
+          "action": "system/Common/OpenSSL/Get SSL Certificate",
+          "inputs": [
+            {
+              "name": "url",
+              "value": "$ForEachTarget.item.host"
+            },
+            {
+              "name": "port",
+              "value": "443"
+            },
+            {
+              "name": "protocol",
+              "value": "\"https:\""
+            }
+          ]
+        },
+        {
+          "name": "EncodePublicCertificate",
+          "function": "// Read the outer X.509 signature algorithm OID for inventory only; this is not trust validation.\nfunction certificateSignature(bytes) {\n    function tlv(offset) {\n        if (offset + 2 > bytes.length) throw new Error('Truncated DER header');\n        const tag = bytes[offset++]; let length = bytes[offset++];\n        if (length & 128) {\n            const count = length & 127;\n            if (!count || count > 4 || offset + count > bytes.length) throw new Error('Invalid DER length');\n            length = 0;\n            for (let i = 0; i < count; i++) length = length * 256 + bytes[offset++];\n        }\n        if (offset + length > bytes.length) throw new Error('Truncated DER value');\n        return { tag, start: offset, end: offset + length };\n    }\n    const root = tlv(0), tbs = tlv(root.start), algorithm = tlv(tbs.end), oid = tlv(algorithm.start);\n    if (root.tag !== 48 || tbs.tag !== 48 || algorithm.tag !== 48 || oid.tag !== 6 || oid.end > algorithm.end) throw new Error('Invalid X.509 algorithm structure');\n    const key = bytes.slice(oid.start, oid.end).map(n => n.toString(16).padStart(2, '0')).join('');\n    return ({'2a864886f70d01010b':'SHA256-RSA','2a864886f70d01010c':'SHA384-RSA','2a864886f70d01010d':'SHA512-RSA',\n        '2a864886f70d010105':'SHA1-RSA','2a8648ce3d040302':'SHA256-ECDSA','2a8648ce3d040303':'SHA384-ECDSA','2a8648ce3d040304':'SHA512-ECDSA'})[key] || 'Unknown-OID-' + key;\n}\n\nlet raw=$ReadTLS.result.raw;\nif (!raw) throw new Error(\"TLS response lacks public DER certificate\");\nfor(let n=0;n<4 && raw.data;n++) raw=raw.data;\nconst bytes=Array.isArray(raw)?raw:Object.keys(raw).filter(k=>/^\\d+$/.test(k)).sort((a,b)=>Number(a)-Number(b)).map(k=>raw[k]);\nif(bytes.length<100 || bytes[0]!==48) throw new Error(\"Unsupported DER representation: \"+Object.keys(raw).slice(0,5).join(\",\"));\n$signatureAlgorithm=certificateSignature(bytes);\nconst b64=Buffer.from(bytes).toString(\"base64\");\n$certificatePem=\"-----BEGIN CERTIFICATE-----\\n\"+b64.match(/.{1,64}/g).join(\"\\n\")+\"\\n-----END CERTIFICATE-----\\n\";\n"
+        },
+        {
+          "name": "DecodeCertificate",
+          "action": "system/Common/OpenSSL/Decode X509",
+          "inputs": [
+            {
+              "name": "data",
+              "value": "$certificatePem"
+            }
+          ]
+        },
+        {
+          "name": "ValidateAndGroup",
+          "function": "\nconst raw=$ReadTLS.result, decoded=$DecodeCertificate.result, target=$ForEachTarget.item;\nif (!raw || !raw.serialNumber || !Number.isFinite(Date.parse(raw.valid_to))) throw new Error(\"Incomplete TLS certificate: \"+target.host);\nconst serial=String(raw.serialNumber).replace(/:/g,\"\").toUpperCase();\nconst fingerprint=raw.fingerprint256;\nif (!fingerprint) throw new Error(\"Missing SHA256 certificate fingerprint\");\nconst properties={subject:decoded.subject.replace(/\\n/g,\", \"),issuer:decoded.issuer.replace(/\\n/g,\", \"),\n validity_start_date:new Date(raw.valid_from).toISOString().replace(\"T\",\" \").replace(/\\.\\d{3}Z$/,\" +0000 UTC\"),\n validity_end_date:new Date(raw.valid_to).toISOString().replace(\"T\",\" \").replace(/\\.\\d{3}Z$/,\" +0000 UTC\"),\n certificate_type:\"SSL/TLS\",namespace:$config.namespace,dns_names:raw.subjectaltname||\"\",fingerprint256:fingerprint,\n metadata:JSON.stringify({source:\"Live HTTPS handshake through Concert Workflows\",cluster_name:$config.cluster,namespace:$config.namespace,certificate_host:target.host,demo:!!target.demo,key_algorithm:raw.modulus?\"RSA\":\"unknown\",key_size:String(raw.bits),key_length:String(raw.bits),bit_length:String(raw.bits),hash_algorithm:$signatureAlgorithm,signature_algorithm:$signatureAlgorithm})};\nif (raw.bits) {properties.key_length=String(raw.bits);properties.key_size=String(raw.bits);}\nproperties.hash_algorithm=$signatureAlgorithm;\nproperties.signature_algorithm=$signatureAlgorithm;\nif (raw.modulus) properties.key_algorithm=\"RSA\";\nif (!$certificates[fingerprint]) $certificates[fingerprint]={type:\"certificate\",ref:\"certificate:\"+serial,serial_number:serial,\n properties:Object.entries(properties).map(([name,value])=>({name,value})),access_points:[]};\nconst cert=$certificates[fingerprint];\nif (!cert.access_points.some(p=>p.url===\"https://\"+target.host)) cert.access_points.push({name:target.host,is_public:\"true\",url:\"https://\"+target.host,port:443});\n$observations.push({host:target.host,serial_number:serial,fingerprint256:fingerprint,subject:raw.subject.CN,issuer:raw.issuer.CN,\n not_after:raw.valid_to,days_remaining:Math.floor((Date.parse(raw.valid_to)-Date.now())/86400000),demo:!!target.demo,\n key_bits:raw.bits,signature_algorithm:$signatureAlgorithm});\n"
+        }
+      ]
+    },
+    {
+      "name": "BuildCertificateDocument",
+      "function": "\nconst components=Object.values($certificates);\n$document={components,dependencies:[{ref:\"environment:\"+$config.environment,depends_on:components.map(c=>c.ref)}]};\n$result={stage:\"collected\",target_count:$config.targets.length,unique_certificates:components.length,observations:$observations};\n"
+    },
+    {
+      "name": "UploadCertificates",
+      "action": "system/IBM/Concert/Import Data/Upload Files to Concert",
+      "inputs": [
+        {
+          "name": "authKey",
+          "value": "$config.upload_auth"
+        },
+        {
+          "name": "file",
+          "value": "{\"data_type\":\"certificate\",\"filename\":JSON.stringify($document)}"
+        },
+        {
+          "name": "fileType",
+          "value": "\"json\""
+        },
+        {
+          "name": "saveAs",
+          "value": "\"langflow-shop-certificates.json\""
+        }
+      ]
+    },
+    {
+      "name": "RequireIngestionReceipt",
+      "function": "if (!$UploadCertificates.result || !$UploadCertificates.result.event_ids || $UploadCertificates.result.event_ids.length!==1) throw new Error(\"No single certificate ingestion event receipt\");"
+    },
+    {
+      "action": "while",
+      "name": "WaitForIngestion",
+      "condition": "!$ingestionComplete && $attempts<60",
+      "blocks": [
+        {
+          "name": "ReadIngestionStatus",
+          "action": "system/Common/HTTP/HTTP Request",
+          "inputs": [
+            {
+              "name": "method",
+              "value": "\"POST\""
+            },
+            {
+              "name": "host",
+              "value": "\"https://\"+$config.concert_host"
+            },
+            {
+              "name": "path",
+              "value": "\"/concert/ingestion/api/v1/table_of_contents/lz/advanced_search\""
+            },
+            {
+              "name": "headers",
+              "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+            },
+            {
+              "name": "authKey",
+              "value": "$config.read_auth"
+            },
+            {
+              "name": "rejectUnauthorized",
+              "value": "true"
+            },
+            {
+              "name": "timeout",
+              "value": "60"
+            },
+            {
+              "name": "body",
+              "value": "{\"filters\":{\"logic\":\"and\",\"conditions\":[{\"field\":\"event_id\",\"value\":$UploadCertificates.result.event_ids[0],\"operator\":\"=\"}]},\"pagination\":{\"page\":1,\"page_size\":10}}"
+            }
+          ]
+        },
+        {
+          "name": "CheckIngestionStatus",
+          "function": "\nif ($ReadIngestionStatus.statusCode!==200) throw new Error(\"Unable to verify ingestion\");\nconst data=typeof $ReadIngestionStatus.result===\"string\"?JSON.parse($ReadIngestionStatus.result):$ReadIngestionStatus.result;\nconst record=(data.toc_records||[])[0];\nif(record && String(record.status).startsWith(\"error\")) throw new Error(\"Certificate ingestion failed: \"+record.status);\n$ingestionComplete=!!record && record.status===\"processing_completed\";\n$attempts++;\n"
+        },
+        {
+          "action": "if",
+          "name": "PauseBeforeRetry",
+          "condition": "!$ingestionComplete",
+          "then": [
+            {
+              "name": "WaitThreeSeconds",
+              "action": "system/Common/Sleep",
+              "inputs": [
+                {
+                  "name": "seconds",
+                  "value": "3"
+                }
+              ]
+            }
+          ],
+          "else": []
+        }
+      ]
+    },
+    {
+      "name": "RequireCompletedIngestion",
+      "function": "if (!$ingestionComplete) throw new Error(\"Certificate ingestion did not finish within the verification window\");"
+    },
+    {
+      "name": "ReadCertificateInventory",
+      "action": "system/Common/HTTP/HTTP Request",
+      "inputs": [
+        {
+          "name": "method",
+          "value": "\"GET\""
+        },
+        {
+          "name": "host",
+          "value": "\"https://\"+$config.concert_host"
+        },
+        {
+          "name": "path",
+          "value": "\"/concert/core/api/v1/certificates\""
+        },
+        {
+          "name": "headers",
+          "value": "{\"Accept\":\"application/json\",\"Content-Type\":\"application/json\",\"InstanceID\":\"0000-0000-0000-0000\"}"
+        },
+        {
+          "name": "authKey",
+          "value": "$config.read_auth"
+        },
+        {
+          "name": "rejectUnauthorized",
+          "value": "true"
+        },
+        {
+          "name": "timeout",
+          "value": "60"
+        },
+        {
+          "name": "query",
+          "value": "{\"page_size\":2000,\"filter\":\"environment_id:\"+$config.environment_id}"
+        }
+      ]
+    },
+    {
+      "name": "VerifyCurrentCertificates",
+      "function": "\nif($ReadCertificateInventory.statusCode!==200) throw new Error(\"Certificate inventory query failed\");\nconst inventory=typeof $ReadCertificateInventory.result===\"string\"?JSON.parse($ReadCertificateInventory.result):$ReadCertificateInventory.result;\nif (inventory.pagination && inventory.pagination.total_count>2000) throw new Error(\"Certificate pagination needs extension\");\nconst records=inventory.certificates||[];\nconst expected=Object.values($certificates);\nconst verified=expected.map(c=>{\n const record=records.find(x=>String(x.serial_number).replace(/:/g,\"\").toUpperCase()===c.serial_number);\n if(!record) throw new Error(\"Expected certificate not in environment: \"+c.serial_number);\n if((record.access_points||[]).length<c.access_points.length) throw new Error(\"Certificate access points were not fully linked\");\n return {id:record.id,serial_number:record.serial_number,subject:record.subject,issuer:record.issuer,\n status:record.status,validity_end_date:record.validity_end_date,access_points:(record.access_points||[]).length};\n});\n$result={stage:\"verified\",target_count:$config.targets.length,unique_certificates:expected.length,\n observation_time:new Date().toISOString(),observations:$observations,certificates:verified,ingestion_event:$UploadCertificates.result.event_ids[0]};\n"
+    }
+  ]
+}
