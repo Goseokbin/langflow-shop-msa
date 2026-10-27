@@ -12,7 +12,7 @@ concurrency:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Check repository and image ingestion boundaries
@@ -28,6 +28,14 @@ jobs:
             -o "$RUNNER_TEMP/oc-client/client.tar.gz"
           tar -xzf "$RUNNER_TEMP/oc-client/client.tar.gz" -C "$RUNNER_TEMP/oc-client" oc
           echo "$RUNNER_TEMP/oc-client" >> "$GITHUB_PATH"
+      - name: Install the image and source scanner
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/trivy"
+          curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_Linux-64bit.tar.gz \
+            -o "$RUNNER_TEMP/trivy/trivy.tar.gz"
+          tar -xzf "$RUNNER_TEMP/trivy/trivy.tar.gz" -C "$RUNNER_TEMP/trivy" trivy
+          echo "$RUNNER_TEMP/trivy" >> "$GITHUB_PATH"
       - name: Authenticate with the namespace CI service account
         env:
           OPENSHIFT_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
@@ -41,12 +49,17 @@ jobs:
           printf '%s' "$OPENSHIFT_CA" > "$RUNNER_TEMP/openshift-ca.pem"
           oc login --server="$OPENSHIFT_SERVER" --token="$OPENSHIFT_TOKEN" \
             --certificate-authority="$RUNNER_TEMP/openshift-ca.pem" >/dev/null
-      - name: Run the complete Tekton pipeline and verify Concert
-        run: python3 scripts/run-devsecops-pipeline.py --start-only --wait-for-idle --wait
+      - name: Scan, build, ingest, deploy and verify directly in GitHub Actions
+        env:
+          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+          CONCERT_AUTH_HEADER: ${{ secrets.CONCERT_AUTH_HEADER }}
+        run: python3 scripts/github-devsecops.py
       - name: Preserve source snapshot manifest
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: source-snapshot-manifest
-          path: .runtime/latest-pipeline-run.json
+          name: devsecops-verification
+          path: |
+            .runtime/github-actions/source-manifest.json
+            .runtime/github-actions/output/public-verification.json
           if-no-files-found: ignore

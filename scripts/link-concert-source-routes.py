@@ -58,6 +58,7 @@ def main():
     parser.add_argument('--repo-url')
     parser.add_argument('--branch')
     parser.add_argument('--provenance-file')
+    parser.add_argument('--build-evidence-file')
     args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     spec=importlib.util.spec_from_file_location('api', ROOT/'scripts/concert-audit-api.py')
@@ -67,7 +68,9 @@ def main():
     deploy=client.request(f'/concert/core/api/v2/environments/{ENV_ID}/deployments/{DEPLOY_ID}/sbom')
     (OUT/'before-application.json').write_text(json.dumps(app,indent=2))
     (OUT/'before-deployment.json').write_text(json.dumps(deploy,indent=2))
-    builds, routes, deployments = oc('builds'),oc('routes'),oc('deployments')
+    builds=[] if args.build_evidence_file else oc('builds')
+    external_builds={b['name']:b for b in json.loads(pathlib.Path(args.build_evidence_file).read_text())} if args.build_evidence_file else {}
+    routes,deployments=oc('routes'),oc('deployments')
     images={d['metadata']['name']:identity(d['spec']['template']['spec']['containers'][0]['image']) for d in deployments}
     remote=args.repo_url or subprocess.check_output(['git','remote','get-url','origin'],cwd=ROOT,text=True).strip().removesuffix('.git')
     from urllib.parse import urlparse
@@ -83,21 +86,25 @@ def main():
         comp=next(x for x in app['components'] if x['name']==name)
         code={'bom-ref':'code:'+repo_name,'type':'code','name':repo_name,'purl':remote,'branch':branch}
         comp['components']=[x for x in comp['components'] if not (x['type']=='code' and x.get('purl') in {remote,os.environ.get('CONCERT_PREVIOUS_REPO_URL')})]+[code]
-        repo,digest=images[name];build=matched_build(builds,digest)
-        revision=build['spec'].get('revision',{}).get('git',{}).get('commit')
-        build_code=dict(code)
-        if revision:build_code['commit_sha']=revision
-        if revision:
-            code['commit_sha']=revision
-        number=build['metadata']['name']
-        evidence={'build.name':number,'build.uid':build['metadata']['uid'],
-                  'build.source_type':build['spec']['source']['type'],
-                  'source.repository':remote,'source.context_dir':'services/'+name,
-                  'source.revision_status':'recorded' if revision else 'not_recorded_in_binary_build',
-                  'image.digest':digest}
+        repo,digest=images[name]
+        if args.build_evidence_file:
+            recorded=external_builds[name]
+            if identity(recorded['image'])!=(repo,digest):raise ValueError('Deployment and build digest mismatch')
+            revision=recorded['git_commit']
+            evidence={'build.engine':'github-actions','build.name':recorded['build'],'build.url':recorded['run_url'],
+                      'source.repository':remote,'source.context_dir':'services/'+name,'source.revision_status':'verified_clean_checkout',
+                      'source.git_commit':revision,'image.digest':digest}
+        else:
+            build=matched_build(builds,digest);revision=build['spec'].get('revision',{}).get('git',{}).get('commit')
+            evidence={'build.name':build['metadata']['name'],'build.uid':build['metadata']['uid'],
+                      'build.source_type':build['spec']['source']['type'],'source.repository':remote,
+                      'source.context_dir':'services/'+name,'source.revision_status':'recorded' if revision else 'not_recorded_in_binary_build','image.digest':digest}
         if args.provenance_file:
             provenance=json.loads(pathlib.Path(args.provenance_file).read_text())
-            if not provenance['dirty']:code['commit_sha']=provenance['git_base_commit']
+            # Concert repository scans are branch-scoped in this installation.
+            # Keep that key stable; immutable commit evidence lives on each image/workload.
+            code.pop('commit_sha',None)
+            code['properties']=properties({'source.latest_scanned_commit':provenance['git_base_commit'],'source.scope':'branch'})
             evidence.update({'source.snapshot_sha256':provenance['archive_sha256'],'source.git_base_commit':provenance['git_base_commit'],'source.git_dirty':str(provenance['dirty']).lower(),'pipeline.run':provenance['run_id']})
         image_definition = next(x for x in comp['components'] if x['type']=='image')
         image_definition['properties'] = [p for p in image_definition.get('properties',[]) if p['name'] not in evidence] + properties(evidence)
@@ -143,7 +150,7 @@ def main():
     appfile=OUT/'application.cdef.json';appfile.write_text(json.dumps(app,indent=2))
     depfile=OUT/'deployment.cdef.json';depfile.write_text(json.dumps(deploy,indent=2))
     report={'repository':remote,'branch':branch,'provenance':records,'public_services':public,
-            'revision_limit':'Binary builds have no recorded commit SHA; branch association is declared, not commit attestation.'}
+            'revision_limit':('Repository SCA is branch-scoped; the build commit is verified in OCI labels and deployment evidence.' if args.build_evidence_file else 'Binary builds have no recorded commit SHA; branch association is declared, not commit attestation.')}
     (OUT/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
     print(json.dumps({'builds':len(records),'routes':len(public),'apply':args.apply}),flush=True)
     if args.apply:

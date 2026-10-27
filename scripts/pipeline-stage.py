@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tekton stage runner; source and images share an immutable source archive hash."""
+"""Shared DevSecOps stage runner; source and images share an immutable source archive hash."""
 import concurrent.futures
 import hashlib
 import importlib.util
@@ -37,7 +37,9 @@ def save(name,data):
 
 def event(stage,state,**values):
     result={'stage':stage,'state':state,'source_snapshot_sha256':MANIFEST['archive_sha256'],**values}
-    save(stage+'.status.json',result);print(json.dumps(result),flush=True)
+    save(stage+'.status.json',result)
+    public = {k:v for k,v in result.items() if k in ['stage','state','source_snapshot_sha256','run_id','git_base_commit','dirty','packages','cves','images','built_images','source_uploaded']} if os.environ.get('PIPELINE_PUBLIC_LOGS') else result
+    print(json.dumps(public),flush=True)
 
 
 def scan_args():return ['--cache-dir',str(WORK/'cache'),'--skip-version-check','--timeout','15m']
@@ -45,10 +47,14 @@ def scan(name,image=None):
     raw=OUT/(name+'.trivy.json');cdx=OUT/(name+'.cdx.json')
     env=os.environ.copy()
     if image:
+        scan_image=image
         if image.startswith('image-registry.openshift-image-registry.svc:5000/'):
             env['TRIVY_USERNAME']='serviceaccount'
-            env['TRIVY_PASSWORD']=pathlib.Path('/var/run/secrets/kubernetes.io/serviceaccount/token').read_text().strip()
-        command=['trivy','image','--image-src','remote',*scan_args(),'--scanners','vuln','--list-all-pkgs','--format','json','--output',str(raw),image]
+            if os.environ.get('DOCKER_REGISTRY_HOST'):
+                scan_image=os.environ['DOCKER_REGISTRY_HOST']+'/'+image.split('/',1)[1]
+                env['TRIVY_PASSWORD']=os.environ['OPENSHIFT_TOKEN']
+            else:env['TRIVY_PASSWORD']=pathlib.Path('/var/run/secrets/kubernetes.io/serviceaccount/token').read_text().strip()
+        command=['trivy','image','--image-src','remote',*scan_args(),'--scanners','vuln','--list-all-pkgs','--format','json','--output',str(raw),scan_image]
     else:command=['trivy','fs',*scan_args(),'--scanners','vuln','--list-all-pkgs','--format','json','--output',str(raw),str(ROOT/'services')]
     with (OUT/(name+'.scan.log')).open('w') as log:
         subprocess.run(command,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
@@ -57,7 +63,7 @@ def scan(name,image=None):
     if os_unsupported:
         # Unsupported OS vulnerability scan has no Results: collect inventory separately.
         with (OUT/(name+'.scan.log')).open('a') as log:
-            subprocess.run(['trivy','image','--image-src','remote',*scan_args(),'--format','cyclonedx','--output',str(cdx),image],env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+            subprocess.run(['trivy','image','--image-src','remote',*scan_args(),'--format','cyclonedx','--output',str(cdx),scan_image],env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
     doc=json.loads(cdx.read_text())
     if image:
         repo,digest=identity(image);doc=normalize_sbom(doc,repo,digest)
@@ -65,6 +71,7 @@ def scan(name,image=None):
         doc['serialNumber']='urn:uuid:'+str(uuid.uuid4())
         root=doc['metadata']['component'];root['name']=MANIFEST.get('repo_name','langflow-shop')
         root['externalReferences']=[{'type':'vcs','url':MANIFEST['repository']}]
+        if not MANIFEST['dirty']:root['version']=MANIFEST['git_base_commit']
         root.setdefault('properties',[]).extend([
             {'name':'source.snapshot_sha256','value':MANIFEST['archive_sha256']},
             {'name':'source.revision_status','value':'working_tree_snapshot' if MANIFEST['dirty'] else 'clean_git_checkout'}])
@@ -145,18 +152,20 @@ def deploy():
     save('previous-deployment-images.json',previous)
     for result in json.loads((OUT/'builds.json').read_text()):
         oc('set','image','deployment/'+result['name'],result['name']+'='+result['image'],'-n','shopping-mall')
-        oc('annotate','deployment/'+result['name'],'-n','shopping-mall','--overwrite','langflow-shop.dev/source.snapshot-sha256='+MANIFEST['archive_sha256'],'langflow-shop.dev/pipeline.run='+MANIFEST['run_id'])
+        oc('annotate','deployment/'+result['name'],'-n','shopping-mall','--overwrite','langflow-shop.dev/source.snapshot-sha256='+MANIFEST['archive_sha256'],'langflow-shop.dev/pipeline.run='+MANIFEST['run_id'],'langflow-shop.dev/source.git-commit='+MANIFEST['git_base_commit'])
     for name in OWN:oc('rollout','status','deployment/'+name,'-n','shopping-mall','--timeout=300s')
     event('deploy','succeeded',deployments=len(OWN))
 
 
 def link_verify():
+    link_args=['--build-evidence-file',str(OUT/'builds.json')] if os.environ.get('PIPELINE_ENGINE')=='github-actions' else []
     subprocess.run(['python3',str(ROOT/'scripts/link-concert-source-routes.py'),'--apply','--authorization-file',str(AUTH),
-                    '--repo-url',MANIFEST['repository'],'--branch',MANIFEST['branch'],'--provenance-file',str(WORK/'source-manifest.json')],check=True,cwd=ROOT)
+                    '--repo-url',MANIFEST['repository'],'--branch',MANIFEST['branch'],'--provenance-file',str(WORK/'source-manifest.json'),*link_args],check=True,cwd=ROOT)
     client=api.Concert(authorization=AUTH);repos=client.request(api.APP+'/source_repos?page_size=2000')['source_repos']
-    repo=next(r for r in repos if r['repo_url'].removesuffix('.git')==MANIFEST['repository'] and r.get('branch')==MANIFEST['branch'] and (MANIFEST['dirty'] or r.get('commit_sha')==MANIFEST['git_base_commit']))
+    repo=next(r for r in repos if r['repo_url'].removesuffix('.git')==MANIFEST['repository'] and r.get('branch')==MANIFEST['branch'])
     root=api.APP+'/source_repos/'+repo['id'];packages=client.request(root+'/packages?page_size=1')['pagination']['total_count'];cves=client.request(root+'/cve_findings?page_size=1')['pagination']['total_count']
-    if not packages or not cves:raise RuntimeError('Repository packages/CVEs were not linked')
+    expected_source=json.loads((OUT/'source-scan.json').read_text())
+    if packages<expected_source['packages'] or cves<expected_source['vulnerabilities']:raise RuntimeError('Repository packages/CVEs were not fully linked')
     artifacts=client.request(api.APP+'/build_artifacts?page_size=2000')['build_artifacts'];verified=[]
     for result in json.loads((OUT/'image-scans.json').read_text()):
         name,digest=identity(result['image']);art=select_artifact(artifacts,name,digest);root=api.APP+'/build_artifacts/'+art['id']
@@ -167,7 +176,7 @@ def link_verify():
         verified.append({'name':result['name'],'id':art['id'],'image':result['image'],'packages':count,'cves':cv,'os_unsupported':result['os_unsupported']})
     topo=client.request(api.APP+'/topology')
     report={'run_id':MANIFEST['run_id'],'source_snapshot_sha256':MANIFEST['archive_sha256'],'git_base_commit':MANIFEST['git_base_commit'],'dirty':MANIFEST['dirty'],
-            'repository':{'id':repo['id'],'packages':packages,'cves':cves},'images':verified,
+            'repository':{'id':repo['id'],'packages':packages,'cves':cves,'scope':'branch','scanned_commit':MANIFEST['git_base_commit']},'images':verified,
             'topology_counts':{k:len(topo[k]) for k in ['source_repos','build_artifacts','public_services','private_services','public_access_points']}}
     save('verification.json',report);event('link-verify','succeeded',**report)
 

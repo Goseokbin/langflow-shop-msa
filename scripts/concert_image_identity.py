@@ -2,6 +2,7 @@
 import copy
 import re
 import uuid
+import urllib.parse
 
 
 def identity(name, digest=None):
@@ -58,6 +59,11 @@ def normalize_sbom(source, name, digest):
     old_ref = comp.get('bom-ref')
     ref = name + '@' + digest
     comp.update({'name': ref, 'bom-ref': ref})
+    if comp.get('purl', '').startswith('pkg:oci/'):
+        base, _, query = comp['purl'].partition('?')
+        qualifiers = dict(urllib.parse.parse_qsl(query))
+        qualifiers['repository_url'] = name
+        comp['purl'] = base + '?' + urllib.parse.urlencode(sorted(qualifiers.items()), safe=':')
     # Rewrite only references to the root image, preserving package identities.
     for dep in result.get('dependencies', []):
         if old_ref and dep.get('ref') == old_ref:
