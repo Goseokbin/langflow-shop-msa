@@ -1,5 +1,6 @@
 """Collect original CodeQL SARIF and verify Concert's real SAST ingestion."""
 import json
+import copy
 from pathlib import Path
 import shutil
 import time
@@ -16,9 +17,9 @@ def summarize_sarif(document):
         tools.append({'name':driver['name'],'version':driver.get('semanticVersion',driver.get('version','unknown'))})
         for invocation in run.get('invocations',[]):
             if invocation.get('executionSuccessful') is False:raise ValueError('CodeQL invocation did not succeed')
-        rules={r['id']:r for r in driver.get('rules',[])}
+        rules={r['id']:r for component in [driver,*run['tool'].get('extensions',[])] for r in component.get('rules',[])}
         for result in run.get('results',[]):
-            rule=result.get('ruleId')
+            rule=result.get('ruleId') or result.get('rule',{}).get('id')
             if not rule or rule not in rules:raise ValueError('SAST result references an unknown rule')
             rule_data=rules[rule];props=rule_data.get('properties',{})
             locations=[]
@@ -34,6 +35,21 @@ def summarize_sarif(document):
     return {'tools':tools,'findings':findings,'finding_count':len(findings),'rules':sorted({f['rule_id'] for f in findings})}
 
 
+def normalize_sarif(document):
+    """Flatten tool-component rules for collectors that read driver.rules only."""
+    result=copy.deepcopy(document)
+    for run in result['runs']:
+        rules={r['id']:r for component in [run['tool']['driver'],*run['tool'].get('extensions',[])] for r in component.get('rules',[])}
+        run['tool']['driver']['rules']=list(rules.values())
+        indices={rule:index for index,rule in enumerate(rules)}
+        for finding in run.get('results',[]):
+            rule=finding.get('ruleId') or finding.get('rule',{}).get('id')
+            if rule not in indices:raise ValueError('Unknown SARIF rule')
+            finding['ruleId']=rule;finding['ruleIndex']=indices[rule]
+            finding['rule']={'id':rule,'index':indices[rule]}
+    return result
+
+
 def collect(work):
     destination=work/'output/sast';destination.mkdir(parents=True,exist_ok=True)
     files=sorted((work/'codeql-results').glob('*.sarif'))
@@ -42,8 +58,11 @@ def collect(work):
     for file in files:
         row=summarize_sarif(json.loads(file.read_text()))
         if 'python' not in file.stem and 'javascript' not in file.stem:raise ValueError('Unexpected CodeQL language report')
-        target=destination/file.name;shutil.copy2(file,target)
-        analyses.append({'language':file.stem,'file':file.name,**row})
+        raw=destination/'original';raw.mkdir(exist_ok=True);shutil.copy2(file,raw/file.name)
+        normalized=normalize_sarif(json.loads(file.read_text()))
+        target=destination/(file.stem+'.json');target.write_text(json.dumps(normalized))
+        if summarize_sarif(normalized)['findings']!=row['findings']:raise ValueError('SARIF normalization changed actual findings')
+        analyses.append({'language':file.stem,'file':target.name,**row})
     if not any('python' in a['language'] for a in analyses) or not any('javascript' in a['language'] for a in analyses):
         raise ValueError('Both Python and JavaScript/TypeScript analyses must complete')
     summary={'analyses':analyses,'finding_count':sum(a['finding_count'] for a in analyses),

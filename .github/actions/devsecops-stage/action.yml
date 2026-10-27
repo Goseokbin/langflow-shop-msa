@@ -75,11 +75,11 @@ runs:
         retention-days: 14
         if-no-files-found: ignore
     - name: Protect state for the next stage
-      if: success() && inputs.stage != 'smoke'
+      if: (success() && inputs.stage != 'smoke') || (failure() && inputs.stage == 'sast-scan')
       shell: bash
       run: python3 scripts/pipeline-workspace.py seal .runtime/outgoing-state/state.enc
     - name: Transfer protected state to the next stage
-      if: success() && inputs.stage != 'smoke'
+      if: (success() && inputs.stage != 'smoke') || (failure() && inputs.stage == 'sast-scan')
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
         name: private-state-${{ inputs.stage }}

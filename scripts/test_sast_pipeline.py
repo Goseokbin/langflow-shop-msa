@@ -1,6 +1,6 @@
 import copy
 import unittest
-from concert_sast import summarize_sarif
+from concert_sast import summarize_sarif, normalize_sarif
 
 class SastBoundaryTests(unittest.TestCase):
     def doc(self):
@@ -18,6 +18,14 @@ class SastBoundaryTests(unittest.TestCase):
             if mutate=='rule':data['runs'][0]['results'][0]['ruleId']='unknown'
             else:data['runs'][0]['results'][0]['locations'][0]['physicalLocation']['artifactLocation']['uri']='file:///runner/test.py'
             with self.assertRaises(ValueError):summarize_sarif(data)
+    def test_codeql_extension_rules_are_normalized_without_changing_findings(self):
+        data=self.doc();rules=data['runs'][0]['tool']['driver'].pop('rules')
+        data['runs'][0]['tool']['extensions']=[{'name':'codeql/python-queries','rules':rules}]
+        data['runs'][0]['results'][0]['rule']={'id':'py/test-rule','index':0,'toolComponent':{'index':0}}
+        before=copy.deepcopy(data);normalized=normalize_sarif(data)
+        self.assertEqual(summarize_sarif(normalized)['findings'],summarize_sarif(data)['findings'])
+        self.assertEqual(normalized['runs'][0]['tool']['driver']['rules'],rules)
+        self.assertEqual(data,before)
     def test_successful_zero_finding_analysis_remains_zero(self):
         data=self.doc();data['runs'][0]['results']=[]
         self.assertEqual(summarize_sarif(data)['finding_count'],0)
