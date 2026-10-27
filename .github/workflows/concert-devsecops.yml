@@ -1,0 +1,52 @@
+name: Langflow shop DevSecOps
+on:
+  push:
+    branches: [main]
+    paths: ['services/**', 'scripts/**', 'openshift/**', '.github/workflows/concert-devsecops.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: langflow-shop-devsecops
+  cancel-in-progress: false
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Check repository and image ingestion boundaries
+        env:
+          CONCERT_HOST: not-used.invalid
+          CONCERT_APP_API: /not-used
+        run: python3 -m unittest discover -s scripts -p test_concert_pipeline.py -v
+      - name: Install the matching OpenShift client
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/oc-client"
+          curl -fsSL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.38/openshift-client-linux.tar.gz \
+            -o "$RUNNER_TEMP/oc-client/client.tar.gz"
+          tar -xzf "$RUNNER_TEMP/oc-client/client.tar.gz" -C "$RUNNER_TEMP/oc-client" oc
+          echo "$RUNNER_TEMP/oc-client" >> "$GITHUB_PATH"
+      - name: Authenticate with the namespace CI service account
+        env:
+          OPENSHIFT_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
+          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+          OPENSHIFT_CA: ${{ secrets.OPENSHIFT_CA }}
+        run: |
+          set -eu
+          test -n "$OPENSHIFT_SERVER"
+          test -n "$OPENSHIFT_TOKEN"
+          umask 077
+          printf '%s' "$OPENSHIFT_CA" > "$RUNNER_TEMP/openshift-ca.pem"
+          oc login --server="$OPENSHIFT_SERVER" --token="$OPENSHIFT_TOKEN" \
+            --certificate-authority="$RUNNER_TEMP/openshift-ca.pem" >/dev/null
+      - name: Run the complete Tekton pipeline and verify Concert
+        run: python3 scripts/run-devsecops-pipeline.py --start-only --wait-for-idle --wait
+      - name: Preserve source snapshot manifest
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: source-snapshot-manifest
+          path: .runtime/latest-pipeline-run.json
+          if-no-files-found: ignore
