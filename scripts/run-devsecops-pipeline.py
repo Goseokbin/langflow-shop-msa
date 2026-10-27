@@ -96,7 +96,7 @@ def main():
         if stage!='prepare':task['params']=[{'name':'stage','value':stage}];task['runAfter']=[tasks[-1]['name']]
         tasks.append(task)
     resources.append(obj('Pipeline','langflow-shop-devsecops',apiVersion='tekton.dev/v1',spec={'workspaces':[{'name':'shared'}],'tasks':tasks}))
-    path=ROOT/'openshift/pipelines/langflow-shop-devsecops.json';path.write_text(json.dumps({'apiVersion':'v1','kind':'List','items':resources},indent=2)+'\n')
+    path=ROOT/'openshift/pipelines/langflow-shop-devsecops.json';path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps({'apiVersion':'v1','kind':'List','items':resources},indent=2)+'\n')
     if not a.start_only:oc('apply','-f','-',data={'apiVersion':'v1','kind':'List','items':resources})
     # Secret goes directly to the API, never into the saved manifests or logs.
     if not a.start_only:oc('apply','-f','-',data=obj('Secret','concert-pipeline-auth',type='Opaque',stringData={'authorization':a.authorization_file.read_text().strip()}))
