@@ -1,0 +1,83 @@
+name: Execute one observable DevSecOps stage
+description: Restore authenticated state, run one stage, publish its demo report.
+inputs:
+  stage:
+    description: Stage command
+    required: true
+  previous:
+    description: Previous stage artifact
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Install OpenShift CLI and Trivy
+      shell: bash
+      run: |
+        set -eu
+        mkdir -p "$RUNNER_TEMP/devsecops-tools"
+        curl -fsSL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.38/openshift-client-linux.tar.gz -o "$RUNNER_TEMP/oc.tgz"
+        tar -xzf "$RUNNER_TEMP/oc.tgz" -C "$RUNNER_TEMP/devsecops-tools" oc
+        curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_Linux-64bit.tar.gz -o "$RUNNER_TEMP/trivy.tgz"
+        tar -xzf "$RUNNER_TEMP/trivy.tgz" -C "$RUNNER_TEMP/devsecops-tools" trivy
+        echo "$RUNNER_TEMP/devsecops-tools" >> "$GITHUB_PATH"
+    - name: Check scan boundaries and protected state transfer
+      if: inputs.stage == 'prepare'
+      shell: bash
+      env:
+        CONCERT_HOST: not-used.invalid
+        CONCERT_APP_API: /not-used
+      run: python3 -m unittest discover -s scripts -p 'test_*pipeline*.py' -v
+    - name: Authenticate to the target namespace
+      shell: bash
+      run: |
+        set -eu
+        umask 077
+        printf '%s' "$OPENSHIFT_CA" > "$RUNNER_TEMP/openshift-ca.pem"
+        oc login --server="$OPENSHIFT_SERVER" --token="$OPENSHIFT_TOKEN" --certificate-authority="$RUNNER_TEMP/openshift-ca.pem" >/dev/null
+    - name: Download the preceding stage state
+      if: inputs.previous != ''
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+      with:
+        name: private-state-${{ inputs.previous }}
+        path: .runtime/incoming-state
+    - name: Verify and restore the preceding stage state
+      if: inputs.previous != ''
+      shell: bash
+      run: python3 scripts/pipeline-workspace.py restore .runtime/incoming-state/state.enc
+    - name: Run stage — ${{ inputs.stage }}
+      id: execute
+      shell: bash
+      run: python3 scripts/github-devsecops.py run '${{ inputs.stage }}'
+    - name: Write the stage demo summary
+      if: always()
+      shell: bash
+      run: python3 scripts/github-devsecops.py report '${{ inputs.stage }}' --outcome '${{ steps.execute.outcome }}'
+    - name: Publish the readable stage report
+      if: always()
+      uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+      with:
+        name: demo-${{ inputs.stage }}
+        path: .runtime/demo-reports/${{ inputs.stage }}.*
+        retention-days: 14
+        if-no-files-found: ignore
+    - name: Protect state for the next stage
+      if: success() && inputs.stage != 'smoke'
+      shell: bash
+      run: python3 scripts/pipeline-workspace.py seal .runtime/outgoing-state/state.enc
+    - name: Transfer protected state to the next stage
+      if: success() && inputs.stage != 'smoke'
+      uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+      with:
+        name: private-state-${{ inputs.stage }}
+        path: .runtime/outgoing-state/state.enc
+        retention-days: 1
+    - name: Remove temporary API credentials
+      if: always()
+      shell: bash
+      run: |
+        python3 - <<'PY'
+        from pathlib import Path
+        for p in [Path('.runtime/github-actions/authorization'), Path.home()/'.kube/config', Path.home()/'.docker/config.json']:
+            p.unlink(missing_ok=True)
+        PY

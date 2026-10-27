@@ -2,64 +2,103 @@ name: Langflow shop DevSecOps
 on:
   push:
     branches: [main]
-    paths: ['services/**', 'scripts/**', 'openshift/**', '.github/workflows/concert-devsecops.yml']
+    paths: ['services/**', 'scripts/**', 'openshift/**', '.github/actions/**', '.github/workflows/concert-devsecops.yml']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
   group: langflow-shop-devsecops
   cancel-in-progress: false
+env:
+  OPENSHIFT_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
+  OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+  OPENSHIFT_CA: ${{ secrets.OPENSHIFT_CA }}
+  CONCERT_AUTH_HEADER: ${{ secrets.CONCERT_AUTH_HEADER }}
+  PIPELINE_STATE_KEY: ${{ secrets.PIPELINE_STATE_KEY }}
 jobs:
-  pipeline:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
+  prepare:
+    name: 01 · 준비
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Check repository and image ingestion boundaries
-        env:
-          CONCERT_HOST: not-used.invalid
-          CONCERT_APP_API: /not-used
-        run: python3 -m unittest discover -s scripts -p test_concert_pipeline.py -v
-      - name: Install the matching OpenShift client
-        run: |
-          set -eu
-          mkdir -p "$RUNNER_TEMP/oc-client"
-          curl -fsSL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.38/openshift-client-linux.tar.gz \
-            -o "$RUNNER_TEMP/oc-client/client.tar.gz"
-          tar -xzf "$RUNNER_TEMP/oc-client/client.tar.gz" -C "$RUNNER_TEMP/oc-client" oc
-          echo "$RUNNER_TEMP/oc-client" >> "$GITHUB_PATH"
-      - name: Install the image and source scanner
-        run: |
-          set -eu
-          mkdir -p "$RUNNER_TEMP/trivy"
-          curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_Linux-64bit.tar.gz \
-            -o "$RUNNER_TEMP/trivy/trivy.tar.gz"
-          tar -xzf "$RUNNER_TEMP/trivy/trivy.tar.gz" -C "$RUNNER_TEMP/trivy" trivy
-          echo "$RUNNER_TEMP/trivy" >> "$GITHUB_PATH"
-      - name: Authenticate with the namespace CI service account
-        env:
-          OPENSHIFT_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
-          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
-          OPENSHIFT_CA: ${{ secrets.OPENSHIFT_CA }}
-        run: |
-          set -eu
-          test -n "$OPENSHIFT_SERVER"
-          test -n "$OPENSHIFT_TOKEN"
-          umask 077
-          printf '%s' "$OPENSHIFT_CA" > "$RUNNER_TEMP/openshift-ca.pem"
-          oc login --server="$OPENSHIFT_SERVER" --token="$OPENSHIFT_TOKEN" \
-            --certificate-authority="$RUNNER_TEMP/openshift-ca.pem" >/dev/null
-      - name: Scan, build, ingest, deploy and verify directly in GitHub Actions
-        env:
-          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
-          CONCERT_AUTH_HEADER: ${{ secrets.CONCERT_AUTH_HEADER }}
-        run: python3 scripts/github-devsecops.py
-      - name: Preserve source snapshot manifest
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: ./.github/actions/devsecops-stage
         with:
-          name: devsecops-verification
-          path: |
-            .runtime/github-actions/source-manifest.json
-            .runtime/github-actions/output/public-verification.json
-          if-no-files-found: ignore
+          stage: prepare
+  source_scan:
+    name: 02 · 소스 Trivy 스캔
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: ./.github/actions/devsecops-stage
+        with:
+          stage: source-scan
+          previous: prepare
+  build:
+    name: 03 · 이미지 빌드 · Push
+    needs: source_scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: ./.github/actions/devsecops-stage
+        with:
+          stage: build
+          previous: source-scan
+  image_scan:
+    name: 04 · 이미지 Trivy 스캔
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: ./.github/actions/devsecops-stage
+        with:
+          stage: image-scan
+          previous: build
+  concert_ingest:
+    name: 05 · Concert 업로드
+    needs: image_scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: ./.github/actions/devsecops-stage
+        with:
+          stage: concert-ingest
+          previous: image-scan
+  deploy:
+    name: 06 · OpenShift 배포
+    needs: concert_ingest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: ./.github/actions/devsecops-stage
+        with:
+          stage: deploy
+          previous: concert-ingest
+  link_verify:
+    name: 07 · Concert 연결 검증
+    needs: deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: ./.github/actions/devsecops-stage
+        with:
+          stage: link-verify
+          previous: deploy
+  smoke:
+    name: 08 · 쇼핑몰 기능 검증
+    needs: link_verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: ./.github/actions/devsecops-stage
+        with:
+          stage: smoke
+          previous: link-verify

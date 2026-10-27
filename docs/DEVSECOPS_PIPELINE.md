@@ -25,3 +25,22 @@ scripts/github-devsecops.py는 GITHUB_SHA와 clean checkout을 확인하고 trac
 ## 이전 Tekton 실험
 
 사내 GitHub에서 Actions를 사용할 수 없어 처음에는 Tekton으로 검증했다. 개인 GitHub 이전 후 Actions 직접 실행으로 전환했다. run-devsecops-pipeline.py 및 기존 PipelineRun/PVC는 이전 방식과 감사 이력이며 현재 workflow의 의존성이 아니다.
+
+## 데모에서 단계별로 확인하기
+
+Actions → Langflow shop DevSecOps → 최신 실행 → Summary에서 8개 job 상자를 확인한다.
+
+1. **01 준비**: 정확한 커밋과 소스 아카이브 해시, 수집 경계·상태 보호 테스트.
+2. **02 소스 Trivy 스캔**: Python/npm 패키지 수와 Trivy advisory 항목.
+3. **03 이미지 빌드 · Push**: 서비스 7개의 실제 digest 및 OCI 커밋 label 검증.
+4. **04 이미지 Trivy 스캔**: 이미지 9개의 package/advisory 수와 PostgreSQL OS 미지원 표시.
+5. **05 Concert 업로드**: package_sbom/code_scan/image_scan 이벤트별 processing_completed 확인.
+6. **06 OpenShift 배포**: 스캔한 digest로 배포하고 Ready 상태 확인.
+7. **07 Concert 연결 검증**: 저장소 패키지·CVE·고유 조합과 이미지·서비스·접속점 연결 확인.
+8. **08 쇼핑몰 기능 검증**: 인증·상품·장바구니·주문·취소 결과.
+
+상자를 클릭하고 Run stage 로그를 펼치면 실행 내용을 볼 수 있다. 상세 로그에는 GitHub 로그인이 필요하다. Summary 하단의 job summary에서 단계별 표를 확인하고, Artifacts의 demo-단계이름에는 같은 내용을 Markdown과 JSON으로 내려받을 수 있다. 실패한 job과 이후 skip된 job이 구분되며, 실패한 단계에도 보고서 생성을 시도한다.
+
+각 job은 서로 다른 runner다. 원본 스캔 결과와 작업 상태는 PIPELINE_STATE_KEY Repository Secret으로 암호화하고 HMAC 무결성 검증 후 다음 job에 전달한다. 키는 초기 구성 때 생성하며 공개 코드·로그·artifact에 저장하지 않는다. private-state-* artifact는 암호문으로 1일 보관한다. 데모에서는 demo-* 보고서를 사용한다. 인증 파일과 Trivy 캐시는 job 간 전달하지 않는다. 각 runner가 같은 run ID·commit·소스 해시를 다시 검증한다.
+
+공개 요약에는 집계와 이미지 digest를 기록하며 원본 SBOM과 상세 내부 레지스트리 위치는 보호된 상태에 둔다. 저장소 CVE 발견 행의 반복 표시는 이전 실습에서 확인된 제한이므로 발견 행 수와 고유 CVE·패키지·버전 조합 수를 구분한다. AI 크레딧·PostgreSQL 분석 범위·감사 모드 제한도 그대로 적용된다.
