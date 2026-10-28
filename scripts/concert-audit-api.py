@@ -127,6 +127,16 @@ class Concert:
             if doc.get("metadata", {}).get("component", {}).get("name") != image + "@" + digest:
                 raise ValueError("SBOM image and upload metadata must have the same canonical identity")
             metadata = dict(metadata, image_name=image, component_name=image, component_type="image", digest=digest)
+        # A scan is replayable after interruption. Concert rejects the same CDX
+        # serialNumber/version pair even when a previous request partially completed.
+        # Document identity is distinct from package/image/repository identity.
+        payload = path.read_bytes()
+        document = json.loads(payload)
+        submitted_serial = None
+        if document.get("bomFormat") == "CycloneDX":
+            submitted_serial = "urn:uuid:" + str(uuid.uuid4())
+            document["serialNumber"] = submitted_serial
+            payload = json.dumps(document).encode()
         boundary = "concert-audit-" + uuid.uuid4().hex
         parts = []
         for k, v in [("data_type", datatype), ("metadata", json.dumps(metadata))]:
@@ -135,15 +145,18 @@ class Concert:
             )
         parts += [
             f'--{boundary}\r\nContent-Disposition: form-data; name="filename"; filename="{path.name}"\r\nContent-Type: application/json\r\n\r\n'.encode(),
-            path.read_bytes(),
+            payload,
             f"\r\n--{boundary}--\r\n".encode(),
         ]
-        return self.request(
+        response = self.request(
             "/concert/ingestion/api/v1/upload_files",
             b"".join(parts),
             "POST",
             "multipart/form-data; boundary=" + boundary,
         )
+        if submitted_serial:
+            response["submitted_sbom_serial_number"] = submitted_serial
+        return response
 
 
 if __name__ == "__main__":
