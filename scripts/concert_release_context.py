@@ -66,7 +66,8 @@ def configure(client,template,manifest,destination,prefix='1.0.1'):
     if response['pagination']['total_count']>2000:raise ValueError('Application version pagination limit')
     matches=[v for v in response['versions'] if v['version']==version]
     if not matches:
-        doc=copy.deepcopy(client.request(template+'/sbom'))
+        from concert_internal_endpoints import compact_properties
+        doc=compact_properties(copy.deepcopy(client.request(template+'/sbom')))
         doc['metadata'].update({'application-version':version,'timestamp':datetime.datetime.now(datetime.timezone.utc).isoformat()})
         destination.parent.mkdir(parents=True,exist_ok=True)
         blueprint=destination.with_name('release-blueprint.json');blueprint.write_text(json.dumps(doc))
