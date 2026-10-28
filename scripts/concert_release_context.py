@@ -27,6 +27,15 @@ def blueprint_signature(doc):
     return components,services
 
 
+def blueprint_matches(actual,expected):
+    observed_components,observed_services=blueprint_signature(actual)
+    expected_components,expected_services=blueprint_signature(expected)
+    if observed_services!=expected_services or not all(c in observed_components for c in expected_components):return False
+    repositories={v['purl'] for c in expected.get('components',[]) for v in c.get('components',[]) if v['type']=='code' and v.get('purl')}
+    extras=[c for c in observed_components if c not in expected_components]
+    return all(name in repositories and all(kind=='code' and purl in repositories for kind,_,purl,_ in children) for name,children in extras)
+
+
 def wait_for_blueprint(client,response,parent,version,expected,timeout=900):
     deadline=time.monotonic()+timeout
     while True:
@@ -48,7 +57,7 @@ def wait_for_blueprint(client,response,parent,version,expected,timeout=900):
             matches=[v for v in versions if v['version']==version]
             if len(matches)==1 and all(e.get('release_id') in [None,matches[0]['id']] for e in evidence):
                 actual=client.request(parent+'/versions/'+matches[0]['id']+'/sbom')
-                if actual['metadata']['application-version']==version and blueprint_signature(actual)==blueprint_signature(expected):
+                if actual['metadata']['application-version']==version and blueprint_matches(actual,expected):
                     return 'core_success_and_blueprint_readback'
         if time.monotonic()>=deadline:raise ValueError('Application blueprint completion could not be verified')
         time.sleep(3)
@@ -67,7 +76,8 @@ def configure(client,template,manifest,destination,prefix='1.0.1'):
     matches=[v for v in response['versions'] if v['version']==version]
     if not matches:
         from concert_internal_endpoints import compact_properties
-        doc=compact_properties(copy.deepcopy(client.request(template+'/sbom')))
+        from concert_source_metadata import strip
+        doc=strip(compact_properties(copy.deepcopy(client.request(template+'/sbom'))),manifest['repository'])
         doc['metadata'].update({'application-version':version,'timestamp':datetime.datetime.now(datetime.timezone.utc).isoformat()})
         destination.parent.mkdir(parents=True,exist_ok=True)
         blueprint=destination.with_name('release-blueprint.json');blueprint.write_text(json.dumps(doc))

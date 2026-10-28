@@ -2,7 +2,7 @@ import json
 import pathlib
 import tempfile
 import unittest
-from concert_release_context import configure,release_version,validate_application_api
+from concert_release_context import configure,release_version,validate_application_api,blueprint_matches
 
 class ImmutableReleaseTests(unittest.TestCase):
     template='/concert/core/api/v2/applications/1199cceb-e68f-4f6f-a96c-b9bffa0b7431/versions/a6b8821f-b02b-4417-b91e-d3831aea377a'
@@ -22,3 +22,13 @@ class ImmutableReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             r=configure(Client(),self.template,{'git_base_commit':'a'*40},pathlib.Path(td)/'context.json')
             self.assertEqual(r['application_api'],self.template)
+
+    def test_readback_allows_only_known_derived_repository_component(self):
+        import copy
+        code={'type':'code','name':'shop','purl':'https://github.com/owner/shop','branch':'main'}
+        expected={'components':[{'name':'user-service','components':[code]}],'services':[]}
+        observed=copy.deepcopy(expected);observed['components'].append({'name':code['purl'],'components':[code]})
+        self.assertTrue(blueprint_matches(observed,expected))
+        observed['components'][-1]['name']='unrelated'
+        self.assertFalse(blueprint_matches(observed,expected))
+        self.assertFalse(blueprint_matches({'components':[],'services':[]},expected))
