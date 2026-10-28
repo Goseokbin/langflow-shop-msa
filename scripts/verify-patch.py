@@ -24,23 +24,30 @@ def validate_change(before, after, changed):
         raise ValueError('Patch must contain exactly the approved one-line version change')
 
 
-def validate_scan(doc, policy=None):
+def validate_scan(doc, policy=None, source=False):
     p = policy or POLICY
-    packages = [x for r in doc.get('Results', []) for x in r.get('Packages', []) if x['Name'] == p['package']]
+    results = doc.get('Results', [])
+    if source:
+        suffix = str(pathlib.PurePosixPath(p['file']).relative_to('services'))
+        results = [r for r in results if r.get('Target', '').replace('\\', '/').endswith('/'+suffix) or r.get('Target') == suffix]
+        if len(results) != 1:
+            raise ValueError('Expected exactly one selected service dependency manifest in source scan')
+    packages = [x for r in results for x in r.get('Packages', []) if x['Name'] == p['package']]
     if not packages or any(x['Version'] != p['to_version'] for x in packages):
         raise ValueError('Target package/version missing or unexpected in actual scan inventory')
-    findings = [v['VulnerabilityID'] for r in doc.get('Results', []) for v in r.get('Vulnerabilities', [])
+    findings = [v['VulnerabilityID'] for r in results for v in r.get('Vulnerabilities', [])
                 if v['PkgName'] == p['package'] and v['VulnerabilityID'] in p['cves']]
     if findings:
         raise ValueError('Target CVEs still present: ' + ', '.join(sorted(set(findings))))
     return {'package': p['package'], 'version': p['to_version'], 'inventory_occurrences': len(packages),
-            'target_cves_absent': p['cves'], 'scope': 'allowlisted package only; other findings remain for triage'}
+            'target_cves_absent': p['cves'], 'scope': p['file'] if source else 'selected image; other findings remain for triage'}
 
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('mode', choices=['diff', 'scan'])
     ap.add_argument('value')
+    ap.add_argument('--source', action='store_true')
     args = ap.parse_args()
     if args.mode == 'diff':
         before = subprocess.check_output(['git', 'show', args.value + ':' + POLICY['file']], text=True)
@@ -48,4 +55,4 @@ if __name__ == '__main__':
         validate_change(before, (ROOT / POLICY['file']).read_text(), changed)
         print('Approved one-line patch scope verified')
     else:
-        print(json.dumps(validate_scan(json.loads(pathlib.Path(args.value).read_text())), indent=2))
+        print(json.dumps(validate_scan(json.loads(pathlib.Path(args.value).read_text()), source=args.source), indent=2))

@@ -56,10 +56,10 @@ jobs:
         run: |
           mkdir -p .runtime/patch-review
           trivy fs --scanners vuln --list-all-pkgs --format json --output .runtime/patch-review/source.json services
-          python3 scripts/verify-patch.py scan .runtime/patch-review/source.json > .runtime/patch-review/source-gate.json
+          python3 scripts/verify-patch.py scan .runtime/patch-review/source.json --source > .runtime/patch-review/source-gate.json
       - name: Resolve dependencies and build patched service
         run: docker build -t patch-review:local "services/$PATCH_SERVICE"
-      - name: Dependency and HTTP client regression checks
+      - name: Dependency and parser/client regression checks
         run: |
           docker run --rm patch-review:local python -m pip check
           docker run --rm -e PATCH_PACKAGE -e PATCH_VERSION patch-review:local python -c 'import os,importlib.metadata; assert importlib.metadata.version(os.environ["PATCH_PACKAGE"])==os.environ["PATCH_VERSION"]'

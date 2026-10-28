@@ -133,7 +133,7 @@ def image_scan():
         if (policy['package']+'=='+policy['to_version']) in (ROOT/policy['file']).read_text().splitlines():
             patch_spec=importlib.util.spec_from_file_location('patch_guard',ROOT/'scripts/verify-patch.py')
             patch_guard=importlib.util.module_from_spec(patch_spec);patch_spec.loader.exec_module(patch_guard)
-            patch_gates[policy['package']]={name:patch_guard.validate_scan(json.loads((OUT/(name+'.trivy.json')).read_text()),policy=policy)
+            patch_gates[policy['package']]={name:patch_guard.validate_scan(json.loads((OUT/(name+'.trivy.json')).read_text()),policy=policy,source=name=='repository')
                    for name in ['repository',policy['service']]}
     if patch_gates:save('patch-verification.json',patch_gates)
     event('image-scan','succeeded',images=len(results),unsupported_os=[r['name'] for r in results if r['os_unsupported']])
