@@ -44,3 +44,7 @@ phase를 staging-tested, production-promoted로 바꿔 세 시점의 JSON을 보
 | 운영 승인·승격 후 | 수정 digest, CVE 없음 | 검증과 같은 digest, CVE 없음 |
 
 위 표는 기대 결과입니다. 실제 실행 증거를 대조해 결과를 기록하며, 실패 시 성공으로 표시하지 않습니다. 과거 취약 이미지가 Concert에 보존돼 있으면 전역 CVE 건수는 남을 수 있습니다. 현재 배포 이미지에 범위를 맞춰 설명합니다. 모델 추론과 다른 CVE는 기존 감사 모드의 별도 범위입니다.
+
+## 판정 범위
+
+이 정책은 user-service의 현재 배포 이미지에 대한 조치만 검증한다. 다른 서비스가 같은 CVE를 보유해도 임의로 닫지 않는다. `global_cve_closed=false`는 의도된 결과이고, `closure=selected_service_verified`는 선택한 서비스의 두 환경 검증 완료를 뜻한다. Concert 릴리스는 소스 커밋별로 분리해 이전 운영 릴리스의 스캔 관계를 보존한다.

@@ -71,7 +71,7 @@ if(productionCveFindings.pagination.total_count>2000)throw new Error("Evidence p
 const productionPackageRows=productionPackages.packages.filter(p=>p.name.toLowerCase().replace(/_/g,"-")===$config.policy.package);
 if(!productionPackageRows.length)throw new Error("Missing production package inventory");
 const productionTargetRows=productionCveFindings.cve_findings.filter(f=>f.package_name.toLowerCase().replace(/_/g,"-")===$config.policy.package&&$config.policy.cves.includes(f.cve));
-$result={...$result,environments:{
+$result={...$result,verification_scope:$config.policy.service+" current image in staging and production",global_cve_closed:false,environments:{
 staging:{image:$stagingRuntime.image,artifact_id:$stagingRuntime.artifact,package_versions:[...new Set(stagingPackageRows.map(p=>p.version))],target_finding_rows:stagingTargetRows.length},
 production:{image:$productionRuntime.image,artifact_id:$productionRuntime.artifact,package_versions:[...new Set(productionPackageRows.map(p=>p.version))],target_finding_rows:productionTargetRows.length}}};
 ''')]
@@ -87,6 +87,7 @@ const sameImages=snapshots.staging.image===snapshots.production.image;
 '''+code[end:]
                 code=code.replace('const ready=$alreadyFixed','const ready=bothFixed && sameImages && $alreadyFixed')
                 code=code.replace('open.length','remaining').replace('concert_package_versions:[...new Set(packages.map(p=>p.version))],','concert_package_versions:[...new Set(packages.map(p=>p.version))],same_image_in_both_environments:sameImages,')
+                code=code.replace('closure:ready && remaining===0?"verified":"not_closed"','closure:ready && remaining===0?"selected_service_verified":"not_closed"')
                 block['function']=code
             for key in ['then','else']:modify(block.get(key,[]))
     modify(flow['blocks'])
