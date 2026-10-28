@@ -126,6 +126,7 @@ def create_release(stages, manifest, client):
         'commit':manifest['git_base_commit'],'snapshot_sha256':manifest['archive_sha256'],
         'source_server':server,'source_namespace':namespace,'registry_host':os.environ['DOCKER_REGISTRY_HOST'],
         'application_name':os.environ.get('APPLICATION_NAME','langflow-shop'),'application_version':os.environ.get('APPLICATION_VERSION','1.0.0'),
+        'concert_application_api':os.environ['CONCERT_APP_API'],
         'images':sorted(images,key=lambda r:r['name']),'deployments':deployments,'services':services,'routes':routes,
         'deployment_sbom':client.request(f'/concert/core/api/v2/environments/{env}/deployments/{deploy}/sbom'),
         'verification':{'commerce_passed':smoke['passed'],'internal_endpoints_verified':verification['internal_endpoints']['verified'],

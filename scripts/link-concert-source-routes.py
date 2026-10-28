@@ -93,6 +93,7 @@ def main():
     images={d['metadata']['name']:identity(d['spec']['template']['spec']['containers'][0]['image']) for d in deployments}
     now=datetime.datetime.now(datetime.timezone.utc).isoformat()
     app['metadata']['timestamp']=now;deploy['metadata']['timestamp']=now
+    deploy['metadata']['application-version']=app['metadata']['application-version']
     records=[]
     for name in sorted(OWN):
         comp=next(x for x in app['components'] if x['name']==name)

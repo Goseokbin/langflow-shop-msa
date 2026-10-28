@@ -136,6 +136,9 @@ def main(args):
     if release['commit']!=source_commit or release['run_id']!=source_run:
         raise ValueError('Release belongs to another commit/run')
     config=get('configmap','langflow-shop-pipeline-config')['data']
+    if release.get('concert_application_api'):
+        from concert_release_context import validate_application_api
+        config['CONCERT_APP_API']=validate_application_api(release['concert_application_api'],config['CONCERT_APP_API'])
     server=oc('whoami','--show-server')
     if server!=config['PRODUCTION_SERVER'] or server==release['source_server']:raise ValueError('Wrong production cluster')
     for row in release['images']:
@@ -170,7 +173,7 @@ def main(args):
         if len(matches)!=1:raise ValueError('Production deployment identity was not uniquely created')
         dep_id=matches[0]['id'];observed=client.request(env_api+'/deployments/'+dep_id+'/sbom')
         verify_document(observed,inventory,deployment=True)
-        oc('patch','configmap','langflow-shop-pipeline-config','-n',NS,'--type=merge','--patch-file=/dev/stdin',data={'data':{'CONCERT_DEPLOYMENT_ID':dep_id}})
+        oc('patch','configmap','langflow-shop-pipeline-config','-n',NS,'--type=merge','--patch-file=/dev/stdin',data={'data':{'CONCERT_DEPLOYMENT_ID':dep_id,'CONCERT_APP_API':config['CONCERT_APP_API'],'APPLICATION_VERSION':release['application_version']}})
         artifacts=client.request(api.APP+'/build_artifacts?page_size=2000')['build_artifacts']
         artifact_checks=[]
         for image in release['images']:

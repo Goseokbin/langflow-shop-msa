@@ -52,6 +52,11 @@ def context():
     auth=WORK/'authorization';auth.touch(mode=0o600);auth.chmod(0o600);auth.write_text(os.environ.pop('CONCERT_AUTH_HEADER').strip())
     os.environ.update(PIPELINE_WORKSPACE=str(WORK),CONCERT_AUTH_FILE=str(auth),PIPELINE_ENGINE='github-actions',PIPELINE_PUBLIC_LOGS='1')
     source=WORK/'source';sys.path.insert(0,str(source/'scripts'))
+    api_spec=importlib.util.spec_from_file_location('release_api',source/'scripts/concert-audit-api.py')
+    release_api=importlib.util.module_from_spec(api_spec);api_spec.loader.exec_module(release_api)
+    from concert_release_context import configure
+    release_context=configure(release_api.Concert(authorization=auth),config['CONCERT_APP_API'],manifest,WORK/'output/release-context.json',config.get('APPLICATION_RELEASE_PREFIX','1.0.1'))
+    os.environ.update(CONCERT_APP_API=release_context['application_api'],APPLICATION_VERSION=release_context['version'])
     spec=importlib.util.spec_from_file_location('pipeline',source/'scripts/pipeline-stage.py')
     stages=importlib.util.module_from_spec(spec);spec.loader.exec_module(stages)
     # Report paths are reconstructed rather than trusting a previous runner's directory.
@@ -126,11 +131,11 @@ def table(headers,rows):
 
 def report(stage,outcome):
     manifest=json.loads((WORK/'source-manifest.json').read_text()) if (WORK/'source-manifest.json').exists() else {}
-    data={'stage':stage,'outcome':outcome,'commit':os.environ['GITHUB_SHA'],'run_url':run_url()}
+    data={'stage':stage,'outcome':outcome,'commit':os.environ['GITHUB_SHA'],'run_url':run_url(),'concert_release':read('release-context.json')}
     text=[f'## {TITLES[STAGES.index(stage)]}',f'결과: **{outcome}** · Commit: `{os.environ["GITHUB_SHA"]}`',f'[전체 단계 그래프로 돌아가기]({run_url()})']
     if stage=='prepare':
         data.update({'source_snapshot_sha256':manifest.get('archive_sha256'),'clean_checkout':manifest.get('dirty') is False})
-        text += ['이후 모든 job은 같은 소스 아카이브와 커밋을 검증합니다.',f'소스 SHA-256: `{manifest.get("archive_sha256","미생성")}`']
+        text += ['이후 모든 job은 같은 소스 아카이브와 커밋을 검증합니다.',f'소스 SHA-256: `{manifest.get("archive_sha256","미생성")}`',f'Concert 릴리스: `{read("release-context.json",{}).get("version","미생성")}`. 이전 운영 릴리스의 패키지·CVE 관계를 덮어쓰지 않습니다.']
     elif stage=='source-scan' and read('source-scan.json'):
         scan=read('source-scan.json');doc=json.loads((WORK/'output/repository.cdx.json').read_text())
         purls=sorted({c['purl'] for c in doc.get('components',[]) if c.get('purl') and c.get('type')!='operating-system'})
@@ -144,7 +149,7 @@ def report(stage,outcome):
         else:text += ['이 규칙 집합에서 발견 항목 0개입니다. 분석 미실행이나 전체 코드 안전 판정을 뜻하지 않습니다.']
     elif stage=='sast-ingest' and read('sast-verification.json'):
         data['sast']=read('sast-verification.json')
-        text += [table(['Concert SAST 확인 항목','결과'],data['sast'].items()),'확인 위치: Concert → langflow-shop 1.0.0 → 노출, 또는 저장소 → SAST 노출. static_code_scan 업로드 처리 완료 후 실제 규칙 ID를 대조합니다.']
+        text += [table(['Concert SAST 확인 항목','결과'],data['sast'].items()),'확인 위치: Concert → langflow-shop의 이번 커밋 릴리스 → 노출, 또는 저장소 → SAST 노출. static_code_scan 업로드 처리 완료 후 실제 규칙 ID를 대조합니다.']
     elif stage=='build' and read('builds.json'):
         data['images']=[{'service':b['name'],'digest':b['image'].rsplit('@',1)[1],'commit':b['git_commit'],'oci_labels_verified':True} for b in read('builds.json')]
         text += [table(['서비스','빌드 이미지 digest','소스 label'],[[b['service'],'`'+b['digest']+'`','검증 통과'] for b in data['images']]),'Push한 digest가 스캔·배포까지 유지됩니다.']
@@ -165,7 +170,7 @@ def report(stage,outcome):
         text += ['### 내부 OpenAPI 엔드포인트 수집 · Concert 대조',
                  table(['서비스','수집 유형','경로 수','HTTP operation 수'],[[r['name'],r['kind'],r['paths'],r['operations']] for r in d['internal_endpoints']['services']]),
                  '내부 주소는 액세스 지점으로 유지하고 실제 OpenAPI 경로를 엔드포인트로 수집합니다. 동일 경로의 GET/POST는 경로 1개, operation 2개입니다. 웹 화면은 루트, PostgreSQL은 TCP 접속점으로 구분합니다.']
-        text += [table(['Concert 확인 항목','조회 결과'],[['저장소 패키지',d['repository']['packages']],['CVE 발견 행',d['repository']['cves']],['고유 CVE·패키지·버전 조합',d['repository'].get('unique_cve_package_version_combinations','미조회')],*d['topology_counts'].items()]),'확인 위치: Concert → langflow-shop 1.0.0 → 저장소 → 사용된 패키지 / CVE 찾은 결과 / 결과 빌드 아티팩트.', '저장소 SCA는 branch 범위입니다. 반복 발견 행과 고유 조합을 구분합니다. 정확한 커밋은 이미지 OCI label 및 Deployment 주석으로 검증합니다.']
+        text += [table(['Concert 확인 항목','조회 결과'],[['저장소 패키지',d['repository']['packages']],['CVE 발견 행',d['repository']['cves']],['고유 CVE·패키지·버전 조합',d['repository'].get('unique_cve_package_version_combinations','미조회')],*d['topology_counts'].items()]),'확인 위치: Concert → langflow-shop의 이번 커밋 릴리스 → 저장소 → 사용된 패키지 / CVE 찾은 결과 / 결과 빌드 아티팩트.', '저장소 SCA는 branch 범위입니다. 반복 발견 행과 고유 조합을 구분합니다. 정확한 커밋은 이미지 OCI label 및 Deployment 주석으로 검증합니다.']
     elif stage=='smoke' and read('smoke.json'):
         data['commerce_checks']=read('smoke.json');data['verification']=read('public-verification.json')
         text += [table(['쇼핑몰 기능 확인','결과'],[[check,'PASS'] for check in data['commerce_checks']['checks']]),'테스트 사용자와 취소된 주문이 남습니다. 실제 AI 생성은 모델 크레딧 부족으로 이번 통과 항목에 포함하지 않습니다.']

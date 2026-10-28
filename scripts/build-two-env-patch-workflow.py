@@ -17,34 +17,41 @@ def build(config):
             {'name':'method','value':'"GET"'},{'name':'host','value':'"https://"+$config.concert_host'},
             {'name':'path','value':path},{'name':'authKey','value':'$config.concert_auth'},
             {'name':'headers','value':'{"Accept":"application/json","InstanceID":"0000-0000-0000-0000"}'},
-            {'name':'query','value':'{"page_size":2000}'},{'name':'rejectUnauthorized','value':'true'},{'name':'timeout','value':'60'}]}
+            {'name':'query','value':'{"page_size":2000,"uncorrelated":true}'},{'name':'rejectUnauthorized','value':'true'},{'name':'timeout','value':'60'}]}
     scope=[]
     for role in ['staging','production']:
         scope.append(request('Read_'+role+'_deployment','"/concert/core/api/v2/environments/"+$config.'+role+'_environment_id+"/deployments/"+$config.'+role+'_deployment_id+"/sbom"'))
-    scope += [request('Read_build_artifacts','$config.application_api+"/build_artifacts"'),fn('Resolve_current_runtime_images',r'''
-for(const r of [$Read_build_artifacts,$Read_staging_deployment,$Read_production_deployment]){if(r.statusCode!==200)throw new Error("Runtime evidence HTTP "+r.statusCode);}
-const inventory=typeof $Read_build_artifacts.result==="string"?JSON.parse($Read_build_artifacts.result):$Read_build_artifacts.result;
+    scope += [request('Read_build_artifacts','"/concert/core/api/v2/build_artifacts"'),fn('Select_service_artifact',r'''
+if($Read_build_artifacts.statusCode!==200)throw new Error("Cannot read artifact groups");
+const groups=typeof $Read_build_artifacts.result==="string"?JSON.parse($Read_build_artifacts.result):$Read_build_artifacts.result;
+if(groups.pagination.total_count>2000)throw new Error("Artifact group pagination limit");
+const matches=groups.build_artifacts.filter(a=>a.name===$config.policy.service&&a.type==="image");
+if(matches.length!==1)throw new Error("No unique service artifact group");
+$targetBuildArtifact=matches[0].id;
+'''),request('Read_image_instances','"/concert/core/api/v2/build_artifacts/"+$targetBuildArtifact+"/instances"'),fn('Resolve_current_runtime_images',r'''
+for(const r of [$Read_image_instances,$Read_staging_deployment,$Read_production_deployment]){if(r.statusCode!==200)throw new Error("Runtime evidence HTTP "+r.statusCode);}
+const inventory=typeof $Read_image_instances.result==="string"?JSON.parse($Read_image_instances.result):$Read_image_instances.result;
 if(inventory.pagination.total_count>2000)throw new Error("Artifact pagination limit");
 const stagingDoc=typeof $Read_staging_deployment.result==="string"?JSON.parse($Read_staging_deployment.result):$Read_staging_deployment.result;
 const stagingImages=stagingDoc["runtime-components"].flatMap(c=>c.components||[]).flatMap(c=>c.components||[]).flatMap(c=>c.components||[]).filter(i=>i.type==="image"&&i.name===$config.policy.service);
 if(stagingImages.length!==1)throw new Error("Ambiguous staging runtime image");
 const stagingURI=stagingImages[0].uri;
 const stagingAt=stagingURI.lastIndexOf("@");
-const stagingArtifacts=inventory.build_artifacts.filter(a=>a.name===stagingURI.slice(0,stagingAt)&&a.digest===stagingURI.slice(stagingAt+1));
+const stagingArtifacts=inventory.instances.filter(a=>a.name===stagingURI.slice(0,stagingAt)&&a.image_digest===stagingURI.slice(stagingAt+1));
 if(stagingArtifacts.length!==1)throw new Error("No unique staging scanned artifact");
-$stagingRuntime={image:stagingURI,artifact:stagingArtifacts[0].id};
+$stagingRuntime={image:stagingURI,artifact:stagingArtifacts[0].id,build_artifact:$targetBuildArtifact};
 const productionDoc=typeof $Read_production_deployment.result==="string"?JSON.parse($Read_production_deployment.result):$Read_production_deployment.result;
 const productionImages=productionDoc["runtime-components"].flatMap(c=>c.components||[]).flatMap(c=>c.components||[]).flatMap(c=>c.components||[]).filter(i=>i.type==="image"&&i.name===$config.policy.service);
 if(productionImages.length!==1)throw new Error("Ambiguous production runtime image");
 const productionURI=productionImages[0].uri;
 const productionAt=productionURI.lastIndexOf("@");
-const productionArtifacts=inventory.build_artifacts.filter(a=>a.name===productionURI.slice(0,productionAt)&&a.digest===productionURI.slice(productionAt+1));
+const productionArtifacts=inventory.instances.filter(a=>a.name===productionURI.slice(0,productionAt)&&a.image_digest===productionURI.slice(productionAt+1));
 if(productionArtifacts.length!==1)throw new Error("No unique production scanned artifact");
-$productionRuntime={image:productionURI,artifact:productionArtifacts[0].id};
+$productionRuntime={image:productionURI,artifact:productionArtifacts[0].id,build_artifact:$targetBuildArtifact};
 ''')]
     for role in ['staging','production']:
         for kind in ['packages','cve_findings']:
-            scope.append(request('Read_'+role+'_'+kind,'$config.application_api+"/build_artifacts/"+$'+role+'Runtime.artifact+"/'+kind+'"'))
+            scope.append(request('Read_'+role+'_'+kind,'"/concert/core/api/v2/build_artifacts/"+$'+role+'Runtime.build_artifact+"/instances/"+$'+role+'Runtime.artifact+"/'+kind+'"'))
     scope += [fn('Summarize_environment_evidence',r'''
 if($Read_staging_packages.statusCode!==200)throw new Error("staging packages HTTP evidence unavailable");
 const stagingPackages=typeof $Read_staging_packages.result==="string"?JSON.parse($Read_staging_packages.result):$Read_staging_packages.result;
@@ -83,7 +90,7 @@ const sameImages=snapshots.staging.image===snapshots.production.image;
                 block['function']=code
             for key in ['then','else']:modify(block.get(key,[]))
     modify(flow['blocks'])
-    flow['variables'] += [{'name':name,'isInput':False,'isOutput':False,'required':False,'level':'INTERMEDIATE','type':{'type':'any'},'value':'null'} for name in ['stagingRuntime','productionRuntime']]
+    flow['variables'] += [{'name':name,'isInput':False,'isOutput':False,'required':False,'level':'INTERMEDIATE','type':{'type':'any'},'value':'null'} for name in ['stagingRuntime','productionRuntime','targetBuildArtifact']]
     flow['meta']['description']='Live CVE evidence in both deployments → allowlisted python-multipart patch PR → PR checks → staging tests → human approval → same images in production → verify current-image CVE absence. No automatic merge or approval.'
     return flow
 if __name__=='__main__':
