@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from promotion_bundle import ALL, seal, unseal, validate_release
+from promotion_bundle import ALL, image_references, seal, unseal, validate_release
 
 
 def release():
@@ -38,6 +38,16 @@ class PromotionPipelineTests(unittest.TestCase):
         self.assertEqual(doc['dependencies'][0]['dependsOn'],[cluster['bom-ref']])
         self.assertEqual(cluster['components'][0]['name'],'shopping-mall-prod')
         self.assertEqual(cluster['components'][0]['components'][0]['uri'],image['source_image'])
+
+    def test_docker_hub_alias_and_registry_port_have_one_scanner_identity(self):
+        d='sha256:'+'a'*64
+        row=image_references('docker.io/langflowai/langflow@'+d,'registry.example.com')
+        self.assertEqual(row['source_image'],'langflowai/langflow@'+d)
+        self.assertEqual(row['pull_image'],row['source_image'])
+        internal='image-registry.openshift-image-registry.svc:5000/shopping-mall/api-gateway@'+d
+        row=image_references(internal,'registry.example.com')
+        self.assertEqual(row['source_image'],internal)
+        self.assertEqual(row['pull_image'],'registry.example.com/shopping-mall/api-gateway@'+d)
 
     def test_authenticated_round_trip_and_tamper(self):
         with tempfile.TemporaryDirectory() as td:

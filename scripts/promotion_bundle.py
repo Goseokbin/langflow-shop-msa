@@ -16,6 +16,14 @@ ALL = OWN | {'langflow','postgresql'}
 MAGIC = b'LFSHOPPROMOTION1\n'
 
 
+def image_references(image, registry):
+    repository, digest = identity(image)
+    source = repository + '@' + digest
+    prefix = 'image-registry.openshift-image-registry.svc:5000/'
+    pull = registry + '/' + source[len(prefix):] if source.startswith(prefix) else source
+    return {'source_image': source, 'pull_image': pull, 'digest': digest}
+
+
 def validate_release(release):
     if release.get('schema_version') != 1 or not re.fullmatch(r'[0-9a-f]{40}', release.get('commit','')):
         raise ValueError('Invalid release identity')
@@ -26,6 +34,8 @@ def validate_release(release):
         raise ValueError('Expected all nine verified images')
     for row in rows:
         repo,digest=identity(row['source_image'])
+        if row['source_image'] != repo+'@'+digest:
+            raise ValueError('Source image must use the canonical scanner identity')
         if digest != row['digest'] or identity(row['pull_image'])[1] != digest:
             raise ValueError('Promotion may not substitute an image digest')
         expected = row['source_image']
@@ -96,10 +106,7 @@ def create_release(stages, manifest, client):
         if d['status'].get('readyReplicas',0)!=d['spec'].get('replicas',1):raise ValueError('Staging is not ready')
         if name in OWN and (image!=builds[name]['image'] or builds[name]['git_commit']!=manifest['git_base_commit']):
             raise ValueError('Built image/source revision mismatch')
-        pull=image
-        prefix='image-registry.openshift-image-registry.svc:5000/'
-        if image.startswith(prefix):pull=os.environ['DOCKER_REGISTRY_HOST']+'/'+image[len(prefix):]
-        images.append({'name':name,'source_image':image,'pull_image':pull,'digest':identity(image)[1]})
+        images.append({'name':name,**image_references(image,os.environ['DOCKER_REGISTRY_HOST'])})
         spec=copy.deepcopy(d['spec']);spec['replicas']=1
         spec['template']['metadata'].pop('annotations',None)
         deployments[name]={'apiVersion':'apps/v1','kind':'Deployment','metadata':{'name':name},'spec':spec}
