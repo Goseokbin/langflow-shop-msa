@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 
@@ -18,6 +19,39 @@ def validate_application_api(path,template):
     result=re.fullmatch(pattern,path);base=re.fullmatch(pattern,template)
     if not result or not base or result[1]!=base[1]:raise ValueError('Release may not select a different Concert application')
     return path
+
+
+def blueprint_signature(doc):
+    components=sorted((c['name'],sorted((x['type'],x['name'],x.get('purl',''),x.get('branch','')) for x in c.get('components',[]))) for c in doc.get('components',[]))
+    services=sorted((s['name'],s.get('network-exposure',''),sorted(json.dumps(e,sort_keys=True) for e in s.get('endpoints',[]))) for s in doc.get('services',[]))
+    return components,services
+
+
+def wait_for_blueprint(client,response,parent,version,expected,timeout=900):
+    deadline=time.monotonic()+timeout
+    while True:
+        evidence=[]
+        for event in response.get('event_ids',[]):
+            query={'filters':{'logic':'and','conditions':[{'field':'event_id','value':event,'operator':'='}]},'pagination':{'page':1,'page_size':50}}
+            records=client.request('/concert/ingestion/api/v1/table_of_contents/lz/advanced_search',json.dumps(query).encode(),'POST','application/json').get('toc_records',[])
+            if not records:break
+            record=records[0];status=record.get('status','')
+            if status.startswith('error') or 'failed' in status:raise ValueError('Application blueprint ingestion failed')
+            for item in record.get('metadata',[]):
+                if item['name']=='component_api_result':
+                    result=json.loads(item['value'])
+                    if result.get('status',{}).get('code') in [200,201] and result.get('status',{}).get('message_code')=='processSbomSuccessMsg':
+                        evidence.append(result['result'])
+            if status=='processing_completed' and not evidence:evidence.append({'release_id':None})
+        if evidence:
+            versions=client.request(parent+'/versions?page_size=2000')['versions']
+            matches=[v for v in versions if v['version']==version]
+            if len(matches)==1 and all(e.get('release_id') in [None,matches[0]['id']] for e in evidence):
+                actual=client.request(parent+'/versions/'+matches[0]['id']+'/sbom')
+                if actual['metadata']['application-version']==version and blueprint_signature(actual)==blueprint_signature(expected):
+                    return 'core_success_and_blueprint_readback'
+        if time.monotonic()>=deadline:raise ValueError('Application blueprint completion could not be verified')
+        time.sleep(3)
 
 
 def configure(client,template,manifest,destination,prefix='1.0.1'):
@@ -36,7 +70,7 @@ def configure(client,template,manifest,destination,prefix='1.0.1'):
         doc['metadata'].update({'application-version':version,'timestamp':datetime.datetime.now(datetime.timezone.utc).isoformat()})
         destination.parent.mkdir(parents=True,exist_ok=True)
         blueprint=destination.with_name('release-blueprint.json');blueprint.write_text(json.dumps(doc))
-        client.wait_for_upload(client.upload(blueprint,'application_sbom',{}),timeout=900)
+        wait_for_blueprint(client,client.upload(blueprint,'application_sbom',{}),parent,version,doc)
         matches=[v for v in client.request(parent+'/versions?page_size=2000')['versions'] if v['version']==version]
     if len(matches)!=1:raise ValueError('Concert release was not uniquely created')
     result={'commit':manifest['git_base_commit'],'version':version,'application_api':parent+'/versions/'+matches[0]['id']}
