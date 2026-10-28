@@ -14,6 +14,7 @@ import subprocess
 import urllib.request
 
 from concert_image_identity import identity
+from concert_source_metadata import sync as sync_source_metadata, strip as strip_source_metadata
 from concert_internal_endpoints import collect, compact_properties, enrich, restore_application_services, verify_document
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -66,6 +67,16 @@ def main():
     spec=importlib.util.spec_from_file_location('api', ROOT/'scripts/concert-audit-api.py')
     api=importlib.util.module_from_spec(spec);spec.loader.exec_module(api)
     client=api.Concert(authorization=args.authorization_file)
+    remote=args.repo_url or subprocess.check_output(['git','remote','get-url','origin'],cwd=ROOT,text=True).strip().removesuffix('.git')
+    from urllib.parse import urlparse
+    parsed=urlparse(remote)
+    if parsed.scheme!='https' or parsed.hostname not in {'github.com','github.ibm.com'} or len(parsed.path.strip('/').split('/'))!=2:
+        raise ValueError('Expected an HTTPS GitHub repository URL')
+    repo_name=parsed.path.strip('/').split('/')[-1]
+    branch=args.branch or subprocess.check_output(['git','branch','--show-current'],cwd=ROOT,text=True).strip()
+    provenance=json.loads(pathlib.Path(args.provenance_file).read_text()) if args.provenance_file else None
+    if args.apply and provenance:
+        sync_source_metadata(client,remote,branch,provenance['git_base_commit'])
     app=client.request(api.APP+'/sbom')
     deploy=client.request(f'/concert/core/api/v2/environments/{ENV_ID}/deployments/{DEPLOY_ID}/sbom')
     (OUT/'before-application.json').write_text(json.dumps(app,indent=2))
@@ -80,13 +91,6 @@ def main():
     enrich(app, internal)
     enrich(deploy, internal, deployment=True)
     images={d['metadata']['name']:identity(d['spec']['template']['spec']['containers'][0]['image']) for d in deployments}
-    remote=args.repo_url or subprocess.check_output(['git','remote','get-url','origin'],cwd=ROOT,text=True).strip().removesuffix('.git')
-    from urllib.parse import urlparse
-    parsed=urlparse(remote)
-    if parsed.scheme!='https' or parsed.hostname not in {'github.com','github.ibm.com'} or len(parsed.path.strip('/').split('/'))!=2:
-        raise ValueError('Expected an HTTPS GitHub repository URL')
-    repo_name=parsed.path.strip('/').split('/')[-1]
-    branch=args.branch or subprocess.check_output(['git','branch','--show-current'],cwd=ROOT,text=True).strip()
     now=datetime.datetime.now(datetime.timezone.utc).isoformat()
     app['metadata']['timestamp']=now;deploy['metadata']['timestamp']=now
     records=[]
@@ -112,7 +116,7 @@ def main():
             # Concert repository scans are branch-scoped in this installation.
             # Keep that key stable; immutable commit evidence lives on each image/workload.
             code.pop('commit_sha',None)
-            code['properties']=properties({'source.latest_scanned_commit':provenance['git_base_commit'],'source.scope':'branch'})
+            # Mutable branch metadata is updated once through the source-instance API.
             evidence.update({'source.snapshot_sha256':provenance['archive_sha256'],'source.git_base_commit':provenance['git_base_commit'],'source.git_dirty':str(provenance['dirty']).lower(),'pipeline.run':provenance['run_id']})
         image_definition = next(x for x in comp['components'] if x['type']=='image')
         image_definition['properties'] = [p for p in image_definition.get('properties',[]) if p['name'] not in evidence] + properties(evidence)
@@ -159,6 +163,7 @@ def main():
         for doc in [app,deploy]:
             merge_dependency(doc,'image:'+name,sr)
         public.append({'service':service_name,'url':base,'route':name,'target_service':target,'endpoints':paths})
+    strip_source_metadata(app,remote);strip_source_metadata(deploy,remote)
     appfile=OUT/'application.cdef.json';appfile.write_text(json.dumps(app,indent=2))
     depfile=OUT/'deployment.cdef.json';depfile.write_text(json.dumps(deploy,indent=2))
     report={'repository':remote,'branch':branch,'provenance':records,'public_services':public,
@@ -172,6 +177,8 @@ def main():
             (OUT/(file.stem+'.ingestion.json')).write_text(json.dumps(response,indent=2))
             client.wait_for_upload(response)
             print('Processed '+file.name,flush=True)
+        if provenance:
+            sync_source_metadata(client,remote,branch,provenance['git_base_commit'])
         verify_document(client.request(api.APP+'/sbom'), internal)
         verify_document(client.request(f'/concert/core/api/v2/environments/{ENV_ID}/deployments/{DEPLOY_ID}/sbom'), internal, deployment=True)
         print(json.dumps({'internal_openapi_verified':True,'api_services':internal['api_services'],
