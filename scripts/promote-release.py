@@ -12,6 +12,7 @@ import sys
 import time
 
 from promotion_bundle import ALL, unseal
+from concert_image_identity import identity, select_artifact
 from concert_internal_endpoints import collect, compact_properties, enrich, verify_document
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -117,11 +118,11 @@ def production_document(release,config,inventory):
     update(doc['runtime-components'])
     enrich(doc,inventory,deployment=True)
     for service in doc.get('services',[]):
+        service['properties']=[p for p in service.get('properties',[]) if p['name']!='kubernetes.namespace']+[{'name':'kubernetes.namespace','value':NS}]
         if service.get('network_exposure')=='public':
             route_name=service['name'].removesuffix('-public')
             route=get('route',route_name)
             service['base-url']='https://'+route['spec']['host']
-            service['properties']=[p for p in service.get('properties',[]) if p['name']!='kubernetes.namespace']+[{'name':'kubernetes.namespace','value':NS}]
     return compact_properties(doc)
 
 
@@ -167,10 +168,27 @@ def main(args):
         verify_document(observed,inventory,deployment=True)
         oc('patch','configmap','langflow-shop-pipeline-config','-n',NS,'--type=merge','--patch-file=/dev/stdin',data={'data':{'CONCERT_DEPLOYMENT_ID':dep_id}})
         artifacts=client.request(api.APP+'/build_artifacts?page_size=2000')['build_artifacts']
-        digestset={a['digest'] for a in artifacts}
-        if any(r['digest'] not in digestset for r in release['images']):raise ValueError('Promoted digest missing from Concert application')
+        artifact_checks=[]
+        for image in release['images']:
+            repo,digest=identity(image['source_image'])
+            artifact=select_artifact(artifacts,repo,digest)
+            root=api.APP+'/build_artifacts/'+artifact['id']
+            packages=client.request(root+'/packages?page_size=1')['pagination']['total_count']
+            cves=client.request(root+'/cve_findings?page_size=1')['pagination']['total_count']
+            if not packages:raise ValueError('Promoted artifact has no package inventory: '+image['name'])
+            artifact_checks.append({'name':image['name'],'artifact_id':artifact['id'],'packages':packages,'cves':cves})
+        runtime_images=[]
+        def walk(value):
+            if isinstance(value,dict):
+                if value.get('type')=='image':runtime_images.append(value['uri'])
+                for child in value.values():walk(child)
+            elif isinstance(value,list):
+                for child in value:walk(child)
+        walk(observed.get('runtime-components',[]))
+        if {identity(x) for x in runtime_images}!={identity(x['source_image']) for x in release['images']}:
+            raise ValueError('Concert production runtime images differ from the verified release')
         report={'commit':release['commit'],'source_run':release['run_id'],'release_sha256':args.expected_sha256,
-            'images':rows,'commerce_checks':len(smoke['results']),'internal_api_paths':inventory['api_paths'],
+            'images':rows,'concert_artifacts':artifact_checks,'commerce_checks':len(smoke['results']),'internal_api_paths':inventory['api_paths'],
             'concert_environment_id':config['CONCERT_ENVIRONMENT_ID'],'concert_deployment_id':dep_id,
             'frontend':'https://'+get('route','frontend')['spec']['host'],'model_inference':'not tested; requires a production model credential and available credits'}
         (OUT/'verification.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))

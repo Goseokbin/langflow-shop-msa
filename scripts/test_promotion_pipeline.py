@@ -28,13 +28,14 @@ class PromotionPipelineTests(unittest.TestCase):
           'runtime-components':[{'bom-ref':'infra:cluster:stage','type':'kubernetes','name':'stage','components':[
             {'bom-ref':'infra:ns:stage','type':'namespace','name':'shopping-mall','components':[
              {'type':'image','name':name,'uri':image['source_image']}]}]}],
-          'services':[],'dependencies':[{'ref':'environment:stage','dependsOn':['infra:cluster:stage']} ]}
+          'services':[{'name':'internal','network_exposure':'private','properties':[{'name':'kubernetes.namespace','value':'shopping-mall'}]}],'dependencies':[{'ref':'environment:stage','dependsOn':['infra:cluster:stage']} ]}
         config={'CONCERT_ENVIRONMENT_NAME':'production','PRODUCTION_CLUSTER_NAME':'prod-cluster','PRODUCTION_CLUSTER_ID':'prod-id','PRODUCTION_SERVER':'https://prod'}
         with patch.dict(os.environ,{'GITHUB_RUN_ID':'123'}):
             doc=promote.production_document(r,config,{'services':[]})
         self.assertEqual(doc['environment'],{'name':'production','bom-ref':'environment:production'})
         cluster=doc['runtime-components'][0]
         self.assertEqual(cluster['api-server'],'https://prod')
+        self.assertEqual(doc['services'][0]['properties'],[{'name':'kubernetes.namespace','value':'shopping-mall-prod'}])
         self.assertEqual(doc['dependencies'][0]['dependsOn'],[cluster['bom-ref']])
         self.assertEqual(cluster['components'][0]['name'],'shopping-mall-prod')
         self.assertEqual(cluster['components'][0]['components'][0]['uri'],image['source_image'])
