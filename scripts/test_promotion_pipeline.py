@@ -27,10 +27,10 @@ class PromotionPipelineTests(unittest.TestCase):
         r['deployment_sbom']={'metadata':{},'environment':{'name':'stage','bom-ref':'environment:stage'},
           'runtime-components':[{'bom-ref':'infra:cluster:stage','type':'kubernetes','name':'stage','components':[
             {'bom-ref':'infra:ns:stage','type':'namespace','name':'shopping-mall','components':[
-             {'type':'image','name':name,'uri':image['source_image']}]}]}],
+             {'type':'deployment','name':name,'components':[{'type':'image','name':name,'uri':image['source_image']}]}]}]}],
           'services':[{'name':'internal','network_exposure':'private','properties':[{'name':'kubernetes.namespace','value':'shopping-mall'}]}],'dependencies':[{'ref':'environment:stage','dependsOn':['infra:cluster:stage']} ]}
         config={'CONCERT_ENVIRONMENT_NAME':'production','PRODUCTION_CLUSTER_NAME':'prod-cluster','PRODUCTION_CLUSTER_ID':'prod-id','PRODUCTION_SERVER':'https://prod'}
-        with patch.dict(os.environ,{'GITHUB_RUN_ID':'123'}):
+        with patch.dict(os.environ,{'GITHUB_RUN_ID':'123'}), patch.object(promote,'get',return_value={'spec':{'template':{'spec':{'containers':[{'name':name,'image':image['pull_image']}]}}}}):
             doc=promote.production_document(r,config,{'services':[]})
         self.assertEqual(doc['environment'],{'name':'production','bom-ref':'environment:production'})
         cluster=doc['runtime-components'][0]
@@ -38,8 +38,13 @@ class PromotionPipelineTests(unittest.TestCase):
         self.assertEqual(doc['services'][0]['properties'],[{'name':'kubernetes.namespace','value':'shopping-mall-prod'}])
         self.assertEqual(doc['dependencies'][0]['dependsOn'],[cluster['bom-ref']])
         self.assertEqual(cluster['components'][0]['name'],'shopping-mall-prod')
-        self.assertEqual(cluster['components'][0]['components'][0]['uri'],image['source_image'])
-        self.assertNotIn('properties',cluster['components'][0]['components'][0],
+        workload=cluster['components'][0]['components'][0]
+        props={p['name']:p['value'] for p in workload['properties']}
+        self.assertEqual(props['workload.type'],'k8s:Deployment')
+        import json
+        self.assertEqual(json.loads(props['metadata'])['containers'],[{'container':name,'image':image['pull_image']}])
+        self.assertEqual(workload['components'][0]['uri'],image['source_image'])
+        self.assertNotIn('properties',workload['components'][0],
                          'Concert CDEF rejects properties on image nodes')
 
     def test_docker_hub_alias_and_registry_port_have_one_scanner_identity(self):

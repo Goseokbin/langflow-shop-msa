@@ -104,8 +104,8 @@ def production_document(release,config,inventory):
             elif typ=='namespace':value['name']=NS;value['properties']=[]
             elif typ=='deployment' and name in images:
                 actual=get('deployment',name)
-                value['properties']=[{'name':'workload.type','value':'Deployment'},
-                  {'name':'metadata','value':json.dumps({'name':name,'namespace':NS,'replicas':1,'containers':actual['spec']['template']['spec']['containers']})},
+                value['properties']=[{'name':'workload.type','value':'k8s:Deployment'},
+                  {'name':'metadata','value':json.dumps({'containers':[{'container':c['name'],'image':c['image']} for c in actual['spec']['template']['spec']['containers']]})},
                   {'name':'source.commit','value':release['commit']},{'name':'promotion.run','value':os.environ['GITHUB_RUN_ID']},
                   {'name':'runtime.image.pull_reference','value':images[name]['pull_image']},
                   {'name':'promotion.verified_digest','value':images[name]['digest']}]
