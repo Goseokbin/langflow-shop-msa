@@ -22,24 +22,51 @@ def build(config):
     for role in ['staging','production']:
         scope.append(request('Read_'+role+'_deployment','"/concert/core/api/v2/environments/"+$config.'+role+'_environment_id+"/deployments/"+$config.'+role+'_deployment_id+"/sbom"'))
     scope += [request('Read_build_artifacts','$config.application_api+"/build_artifacts"'),fn('Resolve_current_runtime_images',r'''
-function data(r){if(r.statusCode!==200)throw new Error("Concert evidence HTTP "+r.statusCode);return typeof r.result==="string"?JSON.parse(r.result):r.result;}
-const inventory=data($Read_build_artifacts);if(inventory.pagination.total_count>2000)throw new Error("Artifact pagination limit");
-function resolve(doc){
- let images=[];function walk(x){if(Array.isArray(x))return x.forEach(walk);if(x&&typeof x==="object"){if(x.type==="image"&&x.name===$config.policy.service)images.push(x.uri);Object.values(x).forEach(walk);}}
- walk(doc["runtime-components"]);images=[...new Set(images)];if(images.length!==1)throw new Error("Ambiguous runtime image");
- const uri=images[0],at=uri.lastIndexOf("@"),name=uri.slice(0,at),digest=uri.slice(at+1);
- const matches=inventory.build_artifacts.filter(a=>a.name===name&&a.digest===digest);if(matches.length!==1)throw new Error("Runtime image has no unique scanned artifact");
- return {image:uri,artifact:matches[0].id};
-}
-$stagingRuntime=resolve(data($Read_staging_deployment));$productionRuntime=resolve(data($Read_production_deployment));
+for(const r of [$Read_build_artifacts,$Read_staging_deployment,$Read_production_deployment]){if(r.statusCode!==200)throw new Error("Runtime evidence HTTP "+r.statusCode);}
+const inventory=typeof $Read_build_artifacts.result==="string"?JSON.parse($Read_build_artifacts.result):$Read_build_artifacts.result;
+if(inventory.pagination.total_count>2000)throw new Error("Artifact pagination limit");
+const stagingDoc=typeof $Read_staging_deployment.result==="string"?JSON.parse($Read_staging_deployment.result):$Read_staging_deployment.result;
+const stagingImages=stagingDoc["runtime-components"].flatMap(c=>c.components||[]).flatMap(c=>c.components||[]).flatMap(c=>c.components||[]).filter(i=>i.type==="image"&&i.name===$config.policy.service);
+if(stagingImages.length!==1)throw new Error("Ambiguous staging runtime image");
+const stagingURI=stagingImages[0].uri;
+const stagingAt=stagingURI.lastIndexOf("@");
+const stagingArtifacts=inventory.build_artifacts.filter(a=>a.name===stagingURI.slice(0,stagingAt)&&a.digest===stagingURI.slice(stagingAt+1));
+if(stagingArtifacts.length!==1)throw new Error("No unique staging scanned artifact");
+$stagingRuntime={image:stagingURI,artifact:stagingArtifacts[0].id};
+const productionDoc=typeof $Read_production_deployment.result==="string"?JSON.parse($Read_production_deployment.result):$Read_production_deployment.result;
+const productionImages=productionDoc["runtime-components"].flatMap(c=>c.components||[]).flatMap(c=>c.components||[]).flatMap(c=>c.components||[]).filter(i=>i.type==="image"&&i.name===$config.policy.service);
+if(productionImages.length!==1)throw new Error("Ambiguous production runtime image");
+const productionURI=productionImages[0].uri;
+const productionAt=productionURI.lastIndexOf("@");
+const productionArtifacts=inventory.build_artifacts.filter(a=>a.name===productionURI.slice(0,productionAt)&&a.digest===productionURI.slice(productionAt+1));
+if(productionArtifacts.length!==1)throw new Error("No unique production scanned artifact");
+$productionRuntime={image:productionURI,artifact:productionArtifacts[0].id};
 ''')]
     for role in ['staging','production']:
         for kind in ['packages','cve_findings']:
             scope.append(request('Read_'+role+'_'+kind,'$config.application_api+"/build_artifacts/"+$'+role+'Runtime.artifact+"/'+kind+'"'))
     scope += [fn('Summarize_environment_evidence',r'''
-function data(r){if(r.statusCode!==200)throw new Error("Concert image evidence HTTP "+r.statusCode);let d=typeof r.result==="string"?JSON.parse(r.result):r.result;if(d.pagination.total_count>2000)throw new Error("Evidence pagination limit");return d;}
-function snapshot(runtime,p,v){let ps=data(p).packages.filter(p=>p.name.toLowerCase().replace(/_/g,"-")===$config.policy.package);if(!ps.length)throw new Error("Missing package inventory");let vs=data(v).cve_findings.filter(f=>f.package_name.toLowerCase().replace(/_/g,"-")===$config.policy.package&&$config.policy.cves.includes(f.cve));return {image:runtime.image,artifact_id:runtime.artifact,package_versions:[...new Set(ps.map(p=>p.version))],target_finding_rows:vs.length};}
-$result={...$result,environments:{staging:snapshot($stagingRuntime,$Read_staging_packages,$Read_staging_cve_findings),production:snapshot($productionRuntime,$Read_production_packages,$Read_production_cve_findings)}};
+if($Read_staging_packages.statusCode!==200)throw new Error("staging packages HTTP evidence unavailable");
+const stagingPackages=typeof $Read_staging_packages.result==="string"?JSON.parse($Read_staging_packages.result):$Read_staging_packages.result;
+if(stagingPackages.pagination.total_count>2000)throw new Error("Evidence pagination limit");
+if($Read_staging_cve_findings.statusCode!==200)throw new Error("staging cve_findings HTTP evidence unavailable");
+const stagingCveFindings=typeof $Read_staging_cve_findings.result==="string"?JSON.parse($Read_staging_cve_findings.result):$Read_staging_cve_findings.result;
+if(stagingCveFindings.pagination.total_count>2000)throw new Error("Evidence pagination limit");
+const stagingPackageRows=stagingPackages.packages.filter(p=>p.name.toLowerCase().replace(/_/g,"-")===$config.policy.package);
+if(!stagingPackageRows.length)throw new Error("Missing staging package inventory");
+const stagingTargetRows=stagingCveFindings.cve_findings.filter(f=>f.package_name.toLowerCase().replace(/_/g,"-")===$config.policy.package&&$config.policy.cves.includes(f.cve));
+if($Read_production_packages.statusCode!==200)throw new Error("production packages HTTP evidence unavailable");
+const productionPackages=typeof $Read_production_packages.result==="string"?JSON.parse($Read_production_packages.result):$Read_production_packages.result;
+if(productionPackages.pagination.total_count>2000)throw new Error("Evidence pagination limit");
+if($Read_production_cve_findings.statusCode!==200)throw new Error("production cve_findings HTTP evidence unavailable");
+const productionCveFindings=typeof $Read_production_cve_findings.result==="string"?JSON.parse($Read_production_cve_findings.result):$Read_production_cve_findings.result;
+if(productionCveFindings.pagination.total_count>2000)throw new Error("Evidence pagination limit");
+const productionPackageRows=productionPackages.packages.filter(p=>p.name.toLowerCase().replace(/_/g,"-")===$config.policy.package);
+if(!productionPackageRows.length)throw new Error("Missing production package inventory");
+const productionTargetRows=productionCveFindings.cve_findings.filter(f=>f.package_name.toLowerCase().replace(/_/g,"-")===$config.policy.package&&$config.policy.cves.includes(f.cve));
+$result={...$result,environments:{
+staging:{image:$stagingRuntime.image,artifact_id:$stagingRuntime.artifact,package_versions:[...new Set(stagingPackageRows.map(p=>p.version))],target_finding_rows:stagingTargetRows.length},
+production:{image:$productionRuntime.image,artifact_id:$productionRuntime.artifact,package_versions:[...new Set(productionPackageRows.map(p=>p.version))],target_finding_rows:productionTargetRows.length}}};
 ''')]
     flow['blocks'][5:5]=scope
     def modify(xs):
