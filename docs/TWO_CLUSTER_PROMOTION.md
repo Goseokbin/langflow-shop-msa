@@ -2,6 +2,8 @@
 
 기존 OpenShift는 검증(staging), 별도 OpenShift는 운영 데모(production)로 사용합니다. **한 번 빌드한 이미지의 digest를 두 환경에서 그대로 사용**합니다. DB와 인증정보, PVC, 외부 주소는 환경별로 분리합니다.
 
+이 데모는 검증 클러스터의 이미지 레지스트리를 두 환경에서 공유합니다. 운영의 새 Pod가 이미지를 pull하려면 해당 레지스트리도 사용 가능해야 합니다. 실제 운영은 독립된 중앙 레지스트리와 인증·보존 정책을 준비하고 빌드·pull 인증 설정을 그 레지스트리에 맞춥니다.
+
 ## 파이프라인에서 볼 곳
 
 | 단계 | 확인할 내용 |
@@ -114,6 +116,8 @@ data:
 | ImagePullBackOff | 운영 release-registry, 원본 레지스트리 TLS와 접근 권한 확인 |
 | PVC/Pod Pending | 로컬 PV가 고정된 노드의 상태와 claim 확인 |
 | 릴리스 검증 실패 | 같은 실행의 artifact/출력인지 확인, 파일 수정·재빌드 금지 |
+| Concert 수집 중 DB 연결 실패 | Concert appdb Pod의 OOM·Ready 상태와 메모리 용량 확인 |
+| 중복 serialNumber/version 오류 | 최신 수집 코드 사용. 업로드 시 문서 serial만 새로 발급하며 아티팩트 식별값은 유지 |
 | Concert에 운영 배포 없음 | 11의 기능 검사 및 Deploy SBOM 수집 완료 확인 |
 
 실패하면 성공으로 표시하지 않습니다. 일부 워크로드가 시작된 상태로 실패할 수 있으므로 해당 job 로그와 운영 Deployment를 확인합니다. 이 데모에는 자동 DB 롤백이나 무중단·고가용성 구성이 포함돼 있지 않습니다.
