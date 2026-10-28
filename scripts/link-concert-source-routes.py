@@ -93,6 +93,8 @@ def main():
     images={d['metadata']['name']:identity(d['spec']['template']['spec']['containers'][0]['image']) for d in deployments}
     now=datetime.datetime.now(datetime.timezone.utc).isoformat()
     app['metadata']['timestamp']=now;deploy['metadata']['timestamp']=now
+    from concert_release_context import deployment_name_for_release
+    deploy['metadata']['deploy-name']=deployment_name_for_release(deploy['metadata']['deploy-name'],deploy['metadata']['application-version'],app['metadata']['application-version'])
     deploy['metadata']['application-version']=app['metadata']['application-version']
     records=[]
     for name in sorted(OWN):
@@ -180,8 +182,13 @@ def main():
             print('Processed '+file.name,flush=True)
         if provenance:
             sync_source_metadata(client,remote,branch,provenance['git_base_commit'])
+        deployments=client.request(f'/concert/core/api/v2/environments/{ENV_ID}/deployments?page_size=2000')['deployments']
+        matches=[d for d in deployments if d['name']==deploy['metadata']['deploy-name']]
+        if len(matches)!=1:raise ValueError('Expected one deployment for this release')
+        current_id=matches[0]['id']
+        (OUT/'current-deployment.json').write_text(json.dumps({'id':current_id,'name':deploy['metadata']['deploy-name'],'application_version':app['metadata']['application-version']}))
         verify_document(client.request(api.APP+'/sbom'), internal)
-        verify_document(client.request(f'/concert/core/api/v2/environments/{ENV_ID}/deployments/{DEPLOY_ID}/sbom'), internal, deployment=True)
+        verify_document(client.request(f'/concert/core/api/v2/environments/{ENV_ID}/deployments/{current_id}/sbom'), internal, deployment=True)
         print(json.dumps({'internal_openapi_verified':True,'api_services':internal['api_services'],
                           'api_paths':internal['api_paths'],'internal_endpoints':internal['endpoint_count']}),flush=True)
 

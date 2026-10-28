@@ -174,6 +174,11 @@ def link_verify():
     link_args=['--build-evidence-file',str(OUT/'builds.json')] if os.environ.get('PIPELINE_ENGINE')=='github-actions' else []
     subprocess.run(['python3',str(ROOT/'scripts/link-concert-source-routes.py'),'--apply','--authorization-file',str(AUTH),
                     '--repo-url',MANIFEST['repository'],'--branch',MANIFEST['branch'],'--provenance-file',str(WORK/'source-manifest.json'),*link_args],check=True,cwd=ROOT)
+    current_deployment=json.loads((ROOT/'.runtime/source-route-links/current-deployment.json').read_text())
+    os.environ['CONCERT_DEPLOYMENT_ID']=current_deployment['id']
+    context_path=OUT/'release-context.json'
+    if context_path.exists():
+        context=json.loads(context_path.read_text());context['current_deployment_id']=current_deployment['id'];context_path.write_text(json.dumps(context))
     client=api.Concert(authorization=AUTH);repos=client.request(api.APP+'/source_repos?page_size=2000')['source_repos']
     repo=next(r for r in repos if r['repo_url'].removesuffix('.git')==MANIFEST['repository'] and r.get('branch')==MANIFEST['branch'])
     root=api.APP+'/source_repos/'+repo['id'];packages=client.request(root+'/packages?page_size=1')['pagination']['total_count'];cves=client.request(root+'/cve_findings?page_size=1')['pagination']['total_count']
@@ -194,7 +199,7 @@ def link_verify():
             'internal_endpoints':{'api_services':internal['api_services'],'api_paths':internal['api_paths'],
                  'endpoint_count':internal['endpoint_count'],'verified':True,
                  'services':[{k:r[k] for k in ['name','kind']} | {'paths':len(r['endpoints']),'operations':len(r['operations'])} for r in internal['services']]},
-            'topology_counts':{k:len(topo[k]) for k in ['source_repos','build_artifacts','public_services','private_services','public_access_points']}}
+            'deployment':current_deployment,'topology_counts':{k:len(topo[k]) for k in ['source_repos','build_artifacts','public_services','private_services','public_access_points']}}
     save('verification.json',report);event('link-verify','succeeded',**report)
 
 

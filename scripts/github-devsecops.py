@@ -57,6 +57,7 @@ def context():
     from concert_release_context import configure
     release_context=configure(release_api.Concert(authorization=auth),config['CONCERT_APP_API'],manifest,WORK/'output/release-context.json',config.get('APPLICATION_RELEASE_PREFIX','1.0.1'))
     os.environ.update(CONCERT_APP_API=release_context['application_api'],APPLICATION_VERSION=release_context['version'])
+    if release_context.get('current_deployment_id'):os.environ['CONCERT_DEPLOYMENT_ID']=release_context['current_deployment_id']
     spec=importlib.util.spec_from_file_location('pipeline',source/'scripts/pipeline-stage.py')
     stages=importlib.util.module_from_spec(spec);spec.loader.exec_module(stages)
     # Report paths are reconstructed rather than trusting a previous runner's directory.

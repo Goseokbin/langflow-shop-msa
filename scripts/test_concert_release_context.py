@@ -2,7 +2,7 @@ import json
 import pathlib
 import tempfile
 import unittest
-from concert_release_context import configure,release_version,validate_application_api,blueprint_matches,wait_for_blueprint
+from concert_release_context import configure,release_version,validate_application_api,blueprint_matches,wait_for_blueprint,deployment_name_for_release
 
 class ImmutableReleaseTests(unittest.TestCase):
     template='/concert/core/api/v2/applications/1199cceb-e68f-4f6f-a96c-b9bffa0b7431/versions/a6b8821f-b02b-4417-b91e-d3831aea377a'
@@ -60,3 +60,8 @@ class ImmutableReleaseTests(unittest.TestCase):
             def request(self,*args,**kwargs):return {'toc_records':[{'status':'processing_in_progress','metadata':[]}]}
         with self.assertRaises(ValueError):
             wait_for_blueprint(API(),{'event_ids':['event']},self.template,'1.0.1',{},timeout=0)
+
+    def test_different_release_cannot_reuse_another_versions_deployment(self):
+        old='deploy_test_shop_1.0.0';new=deployment_name_for_release(old,'1.0.0','1.0.1-abcdef')
+        self.assertEqual(new,'deploy_test_shop_1.0.1-abcdef')
+        self.assertEqual(deployment_name_for_release(new,'1.0.1-abcdef','1.0.1-abcdef'),new)

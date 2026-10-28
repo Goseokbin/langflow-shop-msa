@@ -14,6 +14,14 @@ def release_version(commit,prefix='1.0.1'):
     return prefix+'-'+commit[:12]
 
 
+def deployment_name_for_release(name,old_version,new_version):
+    if old_version==new_version:return name
+    suffix='_'+old_version
+    result=(name[:-len(suffix)] if name.endswith(suffix) else name)+'_'+new_version
+    if len(result)>128:raise ValueError('Deployment name exceeds Concert limit')
+    return result
+
+
 def validate_application_api(path,template):
     pattern=r'/concert/core/api/v2/applications/([a-f0-9-]{36})/versions/([a-f0-9-]{36})'
     result=re.fullmatch(pattern,path);base=re.fullmatch(pattern,template)
@@ -23,7 +31,7 @@ def validate_application_api(path,template):
 
 def blueprint_signature(doc):
     components=sorted((c['name'],sorted((x['type'],x['name'],x.get('purl',''),x.get('branch','')) for x in c.get('components',[]))) for c in doc.get('components',[]))
-    services=sorted((s['name'],s.get('network-exposure',''),sorted(json.dumps(e,sort_keys=True) for e in s.get('endpoints',[]))) for s in doc.get('services',[]))
+    services=sorted((s['name'],s.get('network-exposure','')) for s in doc.get('services',[]))
     return components,services
 
 
