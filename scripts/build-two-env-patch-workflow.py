@@ -13,11 +13,13 @@ def build(config):
     flow=base.build({**config,'workflow_name':'Langflow Multipart CVE Promotion Demo'},policy=policy)
     def fn(name,code):return {'name':name,'function':code}
     def request(name,path):
+        query={'page_size':2000}
+        if name.endswith('_packages') or name.endswith('_cve_findings'):query['uncorrelated']=True
         return {'name':name,'action':'system/Common/HTTP/HTTP Request','inputs':[
             {'name':'method','value':'"GET"'},{'name':'host','value':'"https://"+$config.concert_host'},
             {'name':'path','value':path},{'name':'authKey','value':'$config.concert_auth'},
             {'name':'headers','value':'{"Accept":"application/json","InstanceID":"0000-0000-0000-0000"}'},
-            {'name':'query','value':'{"page_size":2000,"uncorrelated":true}'},{'name':'rejectUnauthorized','value':'true'},{'name':'timeout','value':'60'}]}
+            {'name':'query','value':json.dumps(query)},{'name':'rejectUnauthorized','value':'true'},{'name':'timeout','value':'60'}]}
     scope=[]
     for role in ['staging','production']:
         scope.append(request('Read_'+role+'_deployment','"/concert/core/api/v2/environments/"+$config.'+role+'_environment_id+"/deployments/"+$config.'+role+'_deployment_id+"/sbom"'))
