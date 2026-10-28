@@ -17,6 +17,7 @@ from concert_image_identity import identity
 from concert_internal_endpoints import collect, compact_properties, enrich, restore_application_services, verify_document
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+NS = os.environ.get('SHOP_NAMESPACE', 'shopping-mall')
 OUT = ROOT / '.runtime/source-route-links'
 ENV_ID = os.environ['CONCERT_ENVIRONMENT_ID']
 DEPLOY_ID = os.environ['CONCERT_DEPLOYMENT_ID']
@@ -24,7 +25,7 @@ OWN = {'api-gateway','frontend','cart-service','user-service','product-service',
 
 
 def oc(kind):
-    return json.loads(subprocess.check_output(['oc','get',kind,'-n','shopping-mall','-o','json'], text=True))['items']
+    return json.loads(subprocess.check_output(['oc','get',kind,'-n',NS,'-o','json'], text=True))['items']
 
 
 def walk(items):
@@ -148,7 +149,7 @@ def main():
             if name=='api-gateway':paths=sorted(schema['paths'])
             else:paths=['/']+[p for p in schema['paths'] if p.startswith('/api/v1/run/')]
         service_name=name+'-public';sr='service:'+service_name
-        props=properties({'kubernetes.route':name,'kubernetes.namespace':'shopping-mall',
+        props=properties({'kubernetes.route':name,'kubernetes.namespace':NS,
                           'route.target_service':target,'route.tls_termination':route['spec']['tls']['termination'],
                           'source':'OpenShift Route and live OpenAPI; public denotes network exposure, not anonymous access'})
         app_service={'bom-ref':sr,'name':service_name,'network-exposure':'public','endpoints':paths,'properties':props}

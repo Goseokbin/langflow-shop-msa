@@ -41,8 +41,11 @@ def freeze():
 
 
 def context():
-    config=json.loads(output('oc','get','configmap','langflow-shop-pipeline-config','-n','shopping-mall','-o','json'))['data']
+    namespace=os.environ.get('SHOP_NAMESPACE','shopping-mall')
+    config=json.loads(output('oc','get','configmap','langflow-shop-pipeline-config','-n',namespace,'-o','json'))['data']
     for key in ['CONCERT_HOST','CONCERT_APP_API','CONCERT_ENVIRONMENT_ID','CONCERT_DEPLOYMENT_ID','CONCERT_PREVIOUS_REPO_URL','DOCKER_REGISTRY_HOST']:os.environ[key]=config[key]
+    for key in ['APPLICATION_NAME','APPLICATION_VERSION','SHOP_NAMESPACE']:
+        if key in config:os.environ[key]=config[key]
     manifest=json.loads((WORK/'source-manifest.json').read_text())
     if manifest['git_base_commit']!=os.environ['GITHUB_SHA'] or manifest['run_id']!='github-'+os.environ['GITHUB_RUN_ID']:
         raise RuntimeError('State belongs to a different commit or workflow run')
@@ -66,7 +69,8 @@ def build_images(manifest,stages):
     run_url=f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
     subprocess.run(['docker','login',registry,'--username','serviceaccount','--password-stdin'],input=os.environ['OPENSHIFT_TOKEN'],text=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
     def build(name):
-        tag=f'{registry}/shopping-mall/{name}:{commit}'
+        namespace=os.environ.get('SHOP_NAMESPACE','shopping-mall')
+        tag=f'{registry}/{namespace}/{name}:{commit}'
         labels={'org.opencontainers.image.source':manifest['repository'],'org.opencontainers.image.revision':commit,
                 'io.langflow-shop.source-snapshot-sha256':manifest['archive_sha256']}
         args=['docker','build','--pull','--tag',tag]
@@ -83,10 +87,10 @@ def build_images(manifest,stages):
         image=json.loads(output('docker','image','inspect',tag))[0]
         if any(image['Config']['Labels'].get(k)!=v for k,v in labels.items()):
             raise RuntimeError('Image source label mismatch: '+name)
-        digests=[x.split('@',1)[1] for x in image['RepoDigests'] if x.startswith(registry+'/shopping-mall/'+name+'@')]
+        digests=[x.split('@',1)[1] for x in image['RepoDigests'] if x.startswith(registry+'/'+namespace+'/'+name+'@')]
         if len(set(digests))!=1:raise RuntimeError('Cannot establish pushed digest: '+name)
         result={'name':name,'build':f"github-actions/{os.environ['GITHUB_RUN_ID']}/{name}",'run_url':run_url,
-                'image':'image-registry.openshift-image-registry.svc:5000/shopping-mall/'+name+'@'+digests[0],
+                'image':'image-registry.openshift-image-registry.svc:5000/'+namespace+'/'+name+'@'+digests[0],
                 'git_commit':commit,'source.snapshot-sha256':manifest['archive_sha256'],'verified_oci_labels':labels}
         stages.save(name+'.build.json',result)
         print('Built and verified image: '+name,flush=True)
@@ -107,6 +111,8 @@ def smoke(stages,manifest):
             'topology_counts':verification['topology_counts'],'internal_endpoints':verification['internal_endpoints'],
             'sast':read('sast-verification.json'),'commerce_smoke':'passed','oci_revision_verified_images':len(read('builds.json',[]))}
     stages.save('public-verification.json',public)
+    import promotion_bundle
+    promotion_bundle.create_release(stages,manifest,stages.api.Concert(authorization=stages.AUTH))
     stages.event('smoke','succeeded',checks=len(result['results']))
 
 
@@ -163,6 +169,12 @@ def report(stage,outcome):
     elif stage=='smoke' and read('smoke.json'):
         data['commerce_checks']=read('smoke.json');data['verification']=read('public-verification.json')
         text += [table(['쇼핑몰 기능 확인','결과'],[[check,'PASS'] for check in data['commerce_checks']['checks']]),'테스트 사용자와 취소된 주문이 남습니다. 실제 AI 생성은 모델 크레딧 부족으로 이번 통과 항목에 포함하지 않습니다.']
+        if read('promotion-release.json'):
+            release=read('promotion-release.json');data['promotion_release']=release
+            text += ['### 운영 승인에 사용할 검증된 릴리스',
+                table(['서비스','운영에 승격할 동일 digest'],[[r['name'],r['digest']] for r in release['images']]),
+                '승인 대상 암호화 artifact SHA-256: `'+release['sha256']+'`',
+                '다음 production job은 사용자 승인 후 이 artifact만 복호화하여 배포합니다. 운영에서 이미지를 다시 빌드하지 않습니다.']
     if outcome!='success':text += ['이 단계가 실패해 후속 단계가 실행되지 않았습니다. 해당 job의 **Run stage** 로그에서 실패 원인을 확인하세요.']
     path=ROOT/'.runtime/demo-reports';path.mkdir(parents=True,exist_ok=True)
     (path/(stage+'.json')).write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')

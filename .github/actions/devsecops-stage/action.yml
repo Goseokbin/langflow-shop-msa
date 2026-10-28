@@ -8,6 +8,10 @@ inputs:
     description: Previous stage artifact
     required: false
     default: ''
+outputs:
+  release_sha256:
+    description: Hash of the authenticated encrypted release approved for promotion.
+    value: ${{ steps.execute.outputs.release_sha256 }}
 runs:
   using: composite
   steps:
@@ -74,6 +78,16 @@ runs:
         path: .runtime/demo-reports/${{ inputs.stage }}.*
         retention-days: 14
         if-no-files-found: ignore
+        overwrite: true
+    - name: Publish the verified encrypted release
+      if: success() && inputs.stage == 'smoke'
+      uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+      with:
+        name: verified-release
+        path: .runtime/github-actions/output/release.enc
+        if-no-files-found: error
+        retention-days: 14
+        overwrite: true
     - name: Protect state for the next stage
       if: (success() && inputs.stage != 'smoke') || (failure() && inputs.stage == 'sast-scan')
       shell: bash
@@ -85,6 +99,7 @@ runs:
         name: private-state-${{ inputs.stage }}
         path: .runtime/outgoing-state/state.enc
         retention-days: 1
+        overwrite: true
     - name: Remove temporary API credentials
       if: always()
       shell: bash

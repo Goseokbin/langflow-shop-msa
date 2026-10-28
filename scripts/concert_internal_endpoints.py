@@ -3,9 +3,10 @@ import copy
 import datetime
 import hashlib
 import json
+import os
 import subprocess
 
-NAMESPACE = 'shopping-mall'
+NAMESPACE = os.environ.get('SHOP_NAMESPACE', 'shopping-mall')
 API_PORTS = {'api-gateway': 8000, 'cart-service': 8003, 'langflow': 7860,
              'langflow-ai-service': 8005, 'order-service': 8004,
              'product-service': 8002, 'user-service': 8001}
@@ -60,21 +61,22 @@ def parse_paths(schema):
     return sorted({x['path'] for x in operations}), operations
 
 
-def collect(services, evidence_dir, fetch=raw_api):
+def collect(services, evidence_dir, fetch=raw_api, namespace=None):
+    namespace = namespace or NAMESPACE
     evidence_dir.mkdir(parents=True, exist_ok=True)
     observed = {s['metadata']['name']: s for s in services}
     rows = []
     for name, port in sorted({**API_PORTS, **OTHER_PORTS}.items()):
         service = observed.get(name)
-        if not service or service['metadata']['namespace'] != NAMESPACE:
+        if not service or service['metadata']['namespace'] != namespace:
             raise ValueError('Missing expected internal Service: ' + name)
         ports = service['spec']['ports']
         if len(ports) != 1 or ports[0]['port'] != port or ports[0].get('protocol', 'TCP') != 'TCP':
             raise ValueError('Review unexpected Service port: ' + name)
-        base = f"{'tcp' if name == 'postgresql' else 'http'}://{name}.{NAMESPACE}.svc:{port}"
+        base = f"{'tcp' if name == 'postgresql' else 'http'}://{name}.{namespace}.svc:{port}"
         row = {'name': name, 'base_url': base, 'port': port, 'operations': []}
         if name in API_PORTS:
-            path = f'/api/v1/namespaces/{NAMESPACE}/services/http:{name}:{port}/proxy/openapi.json'
+            path = f'/api/v1/namespaces/{namespace}/services/http:{name}:{port}/proxy/openapi.json'
             raw = fetch(path)
             schema = json.loads(raw)
             endpoints, operations = parse_paths(schema)
@@ -87,7 +89,7 @@ def collect(services, evidence_dir, fetch=raw_api):
             row.update(kind='tcp-socket', endpoints=[base])
         rows.append(row)
     report = {'collected_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-              'namespace': NAMESPACE, 'services': rows,
+              'namespace': namespace, 'services': rows,
               'api_services': len(API_PORTS),
               'api_paths': sum(len(r['endpoints']) for r in rows if r['kind'] == 'openapi'),
               'endpoint_count': sum(len(r['endpoints']) for r in rows)}

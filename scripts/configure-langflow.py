@@ -3,14 +3,16 @@
 
 import base64
 import json
+import os
 import pathlib
 import re
+import sys
 import subprocess
 import urllib.parse
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-NS = "shopping-mall"
+NS = os.environ.get('SHOP_NAMESPACE', 'shopping-mall')
 
 
 def oc(*args, data=None):
@@ -102,6 +104,9 @@ oc(
     data=json.dumps(patch),
 )
 print("Flow configured:", registered["id"], registered["name"])
+if '--configure-only' in sys.argv:
+    print('Flow and application API credential configured; model inference was not requested.')
+    raise SystemExit(0)
 result = request(
     "/api/v1/run/" + registered["id"],
     {

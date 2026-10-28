@@ -2,6 +2,7 @@
 """실제 배포된 Route에서 상품·인증·장바구니·주문·취소 흐름을 검증한다."""
 
 import json
+import os
 import secrets
 import subprocess
 import urllib.error
@@ -15,7 +16,7 @@ host = subprocess.check_output(
         "route",
         "frontend",
         "-n",
-        "shopping-mall",
+        os.environ.get('SHOP_NAMESPACE', 'shopping-mall'),
         "-o",
         "jsonpath={.spec.host}",
     ],

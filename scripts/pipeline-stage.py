@@ -13,6 +13,7 @@ import time
 import uuid
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]
+NS = os.environ.get('SHOP_NAMESPACE', 'shopping-mall')
 WORK=pathlib.Path(os.environ.get('PIPELINE_WORKSPACE','/workspace/shared'))
 OUT=WORK/'output';OUT.mkdir(exist_ok=True)
 MANIFEST=json.loads((WORK/'source-manifest.json').read_text())
@@ -31,7 +32,7 @@ def oc(*args, data=None):
     return run('oc',*args,input=json.dumps(data) if data is not None else None)
 
 
-def items(kind):return json.loads(oc('get',kind,'-n','shopping-mall','-o','json'))['items']
+def items(kind):return json.loads(oc('get',kind,'-n',NS,'-o','json'))['items']
 def save(name,data):
     p=OUT/name;p.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n');return p
 
@@ -93,14 +94,14 @@ def source_scan():
 def build_one(name):
     archive=OUT/(name+'.build.tar.gz')
     with tarfile.open(archive,'w:gz') as tar:tar.add(ROOT/'services'/name,arcname='.')
-    build=oc('start-build',name,'-n','shopping-mall','--from-archive='+str(archive),'-o','name')
+    build=oc('start-build',name,'-n',NS,'--from-archive='+str(archive),'-o','name')
     annotations={'source.snapshot-sha256':MANIFEST['archive_sha256'],'source.git-base-commit':MANIFEST['git_base_commit'],
                  'source.git-dirty':str(MANIFEST['dirty']).lower(),'source.context-sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),
                  'pipeline.run':MANIFEST['run_id']}
-    oc('annotate',build,'-n','shopping-mall','--overwrite',*[f'langflow-shop.dev/{k}={v}' for k,v in annotations.items()])
+    oc('annotate',build,'-n',NS,'--overwrite',*[f'langflow-shop.dev/{k}={v}' for k,v in annotations.items()])
     deadline=time.monotonic()+1200
     while True:
-        obj=json.loads(oc('get',build,'-n','shopping-mall','-o','json'));phase=obj['status']['phase']
+        obj=json.loads(oc('get',build,'-n',NS,'-o','json'));phase=obj['status']['phase']
         if phase=='Complete':break
         if phase in ['Failed','Cancelled','Error'] or time.monotonic()>deadline:raise RuntimeError(build+' '+phase)
         time.sleep(5)
@@ -146,12 +147,12 @@ def upload(client,file,typ,metadata):
 def ingest():
     client=api.Concert(authorization=AUTH)
     meta={'repo_url':MANIFEST['repository'],'repo_name':MANIFEST.get('repo_name','langflow-shop'),'branch':MANIFEST['branch'],'branch_name':MANIFEST['branch'],
-          'component_type':'repository','component_name':MANIFEST.get('repo_name','langflow-shop'),'scanner_name':'trivy','application_name':'langflow-shop','application_version':'1.0.0'}
+          'component_type':'repository','component_name':MANIFEST.get('repo_name','langflow-shop'),'scanner_name':'trivy','application_name':os.environ.get('APPLICATION_NAME','langflow-shop'),'application_version':os.environ.get('APPLICATION_VERSION','1.0.0')}
     if not MANIFEST['dirty']:meta['commit_sha']=MANIFEST['git_base_commit']
     source=json.loads((OUT/'source-scan.json').read_text())
     for typ in ['package_sbom','code_scan']:upload(client,source['file'],typ,meta)
     for result in json.loads((OUT/'image-scans.json').read_text()):
-        repo,digest=identity(result['image']);meta={'image_name':repo,'component_name':repo,'component_type':'image','digest':digest,'scanner_name':'trivy','application_name':'langflow-shop','application_version':'1.0.0'}
+        repo,digest=identity(result['image']);meta={'image_name':repo,'component_name':repo,'component_type':'image','digest':digest,'scanner_name':'trivy','application_name':os.environ.get('APPLICATION_NAME','langflow-shop'),'application_version':os.environ.get('APPLICATION_VERSION','1.0.0')}
         upload(client,result['file'],'package_sbom',meta)
         if not result['os_unsupported']:upload(client,result['file'],'image_scan',meta)
     event('concert-ingest','succeeded',source_uploaded=True)
@@ -161,9 +162,9 @@ def deploy():
     previous={d['metadata']['name']:d['spec']['template']['spec']['containers'][0]['image'] for d in items('deployments')}
     save('previous-deployment-images.json',previous)
     for result in json.loads((OUT/'builds.json').read_text()):
-        oc('set','image','deployment/'+result['name'],result['name']+'='+result['image'],'-n','shopping-mall')
-        oc('annotate','deployment/'+result['name'],'-n','shopping-mall','--overwrite','langflow-shop.dev/source.snapshot-sha256='+MANIFEST['archive_sha256'],'langflow-shop.dev/pipeline.run='+MANIFEST['run_id'],'langflow-shop.dev/source.git-commit='+MANIFEST['git_base_commit'])
-    for name in OWN:oc('rollout','status','deployment/'+name,'-n','shopping-mall','--timeout=300s')
+        oc('set','image','deployment/'+result['name'],result['name']+'='+result['image'],'-n',NS)
+        oc('annotate','deployment/'+result['name'],'-n',NS,'--overwrite','langflow-shop.dev/source.snapshot-sha256='+MANIFEST['archive_sha256'],'langflow-shop.dev/pipeline.run='+MANIFEST['run_id'],'langflow-shop.dev/source.git-commit='+MANIFEST['git_base_commit'])
+    for name in OWN:oc('rollout','status','deployment/'+name,'-n',NS,'--timeout=300s')
     event('deploy','succeeded',deployments=len(OWN))
 
 

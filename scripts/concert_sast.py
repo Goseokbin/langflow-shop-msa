@@ -1,5 +1,6 @@
 """Collect original CodeQL SARIF and verify Concert's real SAST ingestion."""
 import json
+import os
 import copy
 from pathlib import Path
 import shutil
@@ -136,7 +137,7 @@ def verify(client,api,work):
 def ingest(work,manifest,stages,authorization):
     summary=json.loads((work/'output/sast-scan.json').read_text())
     metadata={'repo_url':manifest['repository'],'repo_name':manifest['repo_name'],'branch':manifest['branch'],'branch_name':manifest['branch'],
-              'scanner_name':'CodeQL','application_name':'langflow-shop','application_version':'1.0.0'}
+              'scanner_name':'CodeQL','application_name':os.environ.get('APPLICATION_NAME','langflow-shop'),'application_version':os.environ.get('APPLICATION_VERSION','1.0.0')}
     client=stages.api.Concert(authorization=authorization)
     stages.upload(client,work/'output/sast'/summary['merged_file'],'static_code_scan',metadata)
     return verify(client,stages.api,work)

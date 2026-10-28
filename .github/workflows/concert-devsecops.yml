@@ -15,6 +15,7 @@ env:
   OPENSHIFT_CA: ${{ secrets.OPENSHIFT_CA }}
   CONCERT_AUTH_HEADER: ${{ secrets.CONCERT_AUTH_HEADER }}
   PIPELINE_STATE_KEY: ${{ secrets.PIPELINE_STATE_KEY }}
+  PROMOTION_STATE_KEY: ${{ secrets.PROMOTION_STATE_KEY }}
 jobs:
   prepare:
     name: 01 · 준비
@@ -95,7 +96,7 @@ jobs:
           stage: concert-ingest
           previous: image-scan
   deploy:
-    name: 08 · OpenShift 배포
+    name: 08 · 검증 OpenShift 배포
     needs: concert_ingest
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -121,9 +122,64 @@ jobs:
     needs: link_verify
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      release_sha256: ${{ steps.smoke.outputs.release_sha256 }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-      - uses: ./.github/actions/devsecops-stage
+      - id: smoke
+        uses: ./.github/actions/devsecops-stage
         with:
           stage: smoke
           previous: link-verify
+  production:
+    name: 11 · 운영 배포 — 승인 필요
+    needs: smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment:
+      name: production
+    env:
+      OPENSHIFT_SERVER: ${{ secrets.PROD_OPENSHIFT_SERVER }}
+      OPENSHIFT_TOKEN: ${{ secrets.PROD_OPENSHIFT_TOKEN }}
+      OPENSHIFT_CA: ${{ secrets.PROD_OPENSHIFT_CA }}
+      CONCERT_AUTH_HEADER: ${{ secrets.PROD_CONCERT_AUTH_HEADER }}
+      SHOP_NAMESPACE: shopping-mall-prod
+      DEPLOYMENT_TIER: production
+      RELEASE_SHA256: ${{ needs.smoke.outputs.release_sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Install OpenShift CLI
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/promotion-tools"
+          curl -fsSL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.38/openshift-client-linux.tar.gz -o "$RUNNER_TEMP/oc.tgz"
+          tar -xzf "$RUNNER_TEMP/oc.tgz" -C "$RUNNER_TEMP/promotion-tools" oc
+          echo "$RUNNER_TEMP/promotion-tools" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: verified-release
+          path: .runtime/approved-release
+      - name: Authenticate after human approval
+        shell: bash
+        run: |
+          set -eu
+          umask 077
+          printf '%s' "$OPENSHIFT_CA" > "$RUNNER_TEMP/production-ca.pem"
+          oc login --server="$OPENSHIFT_SERVER" --token="$OPENSHIFT_TOKEN" --certificate-authority="$RUNNER_TEMP/production-ca.pem" >/dev/null
+      - name: Promote the exact tested digests · verify commerce · ingest production
+        run: python3 scripts/promote-release.py --release .runtime/approved-release/release.enc --expected-sha256 "$RELEASE_SHA256"
+      - name: Publish production verification
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: demo-production
+          path: .runtime/production/verification.json
+          if-no-files-found: ignore
+          retention-days: 14
+          overwrite: true
+      - name: Remove temporary credentials
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$HOME/.kube/config" "$RUNNER_TEMP/production-ca.pem" .runtime/production/authorization
