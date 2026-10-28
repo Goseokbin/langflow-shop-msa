@@ -8,16 +8,17 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 def load_policy(name='requests'):
-    paths={'requests':'scripts/patch-policy.json','multipart':'scripts/patch-policies/multipart.json'}
-    if name not in paths:raise ValueError('Unknown patch policy')
-    return json.loads((ROOT/paths[name]).read_text())
+    from patch_catalog import load_policies
+    policies=load_policies()
+    if name not in policies:raise ValueError('Unknown patch policy')
+    return policies[name]
 
 POLICY = load_policy(os.environ.get('PATCH_POLICY','requests'))
 
 
 def validate_change(before, after, changed):
     p = POLICY
-    old, new = f"{p['package']}=={p['from_version']}", f"{p['package']}=={p['to_version']}"
+    old, new = f"{p.get('requirement',p['package'])}=={p['from_version']}", f"{p.get('requirement',p['package'])}=={p['to_version']}"
     if changed != [p['file']] or before.splitlines().count(old) != 1:
         raise ValueError('Patch scope or base version differs from the approved policy')
     if after != before.replace(old, new):

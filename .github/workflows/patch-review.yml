@@ -7,14 +7,16 @@ permissions:
 concurrency:
   group: patch-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
-env:
-  PATCH_POLICY: ${{ startsWith(github.head_ref, 'concert-patch/python-multipart-') && 'multipart' || 'requests' }}
-  PATCH_SERVICE: ${{ startsWith(github.head_ref, 'concert-patch/python-multipart-') && 'user-service' || 'langflow-ai-service' }}
-  PATCH_PACKAGE: ${{ startsWith(github.head_ref, 'concert-patch/python-multipart-') && 'python-multipart' || 'requests' }}
-  PATCH_VERSION: ${{ startsWith(github.head_ref, 'concert-patch/python-multipart-') && '0.0.32' || '2.33.0' }}
-  PATCH_PORT: ${{ startsWith(github.head_ref, 'concert-patch/python-multipart-') && '8001' || '8005' }}
 jobs:
   scope:
+    if: startsWith(github.head_ref, 'concert-patch/')
+    outputs:
+      policy: ${{ steps.policy.outputs.policy }}
+      service: ${{ steps.policy.outputs.service }}
+      package: ${{ steps.policy.outputs.package }}
+      version: ${{ steps.policy.outputs.version }}
+      port: ${{ steps.policy.outputs.port }}
+      regression: ${{ steps.policy.outputs.regression }}
     name: 01 · 패치 변경 범위
     runs-on: ubuntu-24.04
     steps:
@@ -22,18 +24,31 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Resolve reviewed policy for this branch
+        id: policy
+        env:
+          PATCH_BRANCH: ${{ github.head_ref }}
+        run: python3 scripts/patch_catalog.py --branch "$PATCH_BRANCH" --github-output "$GITHUB_OUTPUT"
       - name: Validate allowlisted version change
         if: startsWith(github.head_ref, 'concert-patch/')
         env:
+          PATCH_POLICY: ${{ steps.policy.outputs.policy }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python3 scripts/verify-patch.py diff "$BASE_SHA"
       - name: Verify policy guards
-        run: python3 -m unittest discover -s scripts -p 'test_patch_pipeline.py' -v
+        run: python3 -m unittest discover -s scripts -p 'test*patch*.py' -v
   scan_build:
     name: 02 · 패키지 · 이미지 검사
     needs: scope
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      PATCH_POLICY: ${{ needs.scope.outputs.policy }}
+      PATCH_SERVICE: ${{ needs.scope.outputs.service }}
+      PATCH_PACKAGE: ${{ needs.scope.outputs.package }}
+      PATCH_VERSION: ${{ needs.scope.outputs.version }}
+      PATCH_PORT: ${{ needs.scope.outputs.port }}
+      PATCH_REGRESSION: ${{ needs.scope.outputs.regression }}
     services:
       postgres:
         image: postgres:16
@@ -63,11 +78,7 @@ jobs:
         run: |
           docker run --rm patch-review:local python -m pip check
           docker run --rm -e PATCH_PACKAGE -e PATCH_VERSION patch-review:local python -c 'import os,importlib.metadata; assert importlib.metadata.version(os.environ["PATCH_PACKAGE"])==os.environ["PATCH_VERSION"]'
-          if [ "$PATCH_POLICY" = multipart ]; then
-            docker run --rm -i patch-review:local python < scripts/multipart-regression.py
-          else
-            docker run --rm -i patch-review:local python < scripts/requests-regression.py
-          fi
+          docker run --rm -i patch-review:local python < "$PATCH_REGRESSION"
       - name: Start service and check health
         run: |
           docker run -d --name patch-app --network host -e POSTGRES_HOST=127.0.0.1 -e POSTGRES_PASSWORD=patch-test -e POSTGRES_DB=user_db patch-review:local

@@ -7,10 +7,11 @@ spec=importlib.util.spec_from_file_location('patch_builder',Path(__file__).with_
 base=importlib.util.module_from_spec(spec);spec.loader.exec_module(base)
 
 def build(config):
-    policy=json.loads((ROOT/'scripts/patch-policies/multipart.json').read_text())
+    from patch_catalog import load_policies
+    policies=load_policies()
     for role in ['staging','production']:
         assert config[role+'_environment_id'] and config[role+'_deployment_id']
-    flow=base.build({**config,'workflow_name':'Langflow Multipart CVE Promotion Demo'},policy=policy)
+    flow=base.build({**config,'workflow_name':'Langflow Dependency Remediation'},policies=policies)
     def fn(name,code):return {'name':name,'function':code}
     def request(name,path):
         query={'page_size':2000}
@@ -21,6 +22,23 @@ def build(config):
             {'name':'headers','value':'{"Accept":"application/json","InstanceID":"0000-0000-0000-0000"}'},
             {'name':'query','value':json.dumps(query)},{'name':'rejectUnauthorized','value':'true'},{'name':'timeout','value':'60'}]}
     scope=[]
+    # Resolve each latest pipeline-owned deployment on every run, not a pinned old release.
+    for role in ['staging','production']:
+        scope.append(request('List_'+role+'_deployments','"/concert/core/api/v2/environments/"+$config.'+role+'_environment_id+"/deployments"'))
+    scope.append(fn('Select_latest_deployments',r'''
+const application=$config.application_api.split("/")[6];
+for(const role of ["staging","production"]){
+ const response=role==="staging"?$List_staging_deployments:$List_production_deployments;
+ if(response.statusCode!==200)throw new Error("Cannot list "+role+" deployments");
+ const doc=typeof response.result==="string"?JSON.parse(response.result):response.result;
+ if(doc.pagination.total_count>2000)throw new Error("Deployment pagination limit");
+ const prefix=role==="staging"?$config.staging_deployment_prefix:$config.production_deployment_prefix;
+ if(!prefix)throw new Error("Missing pipeline deployment prefix");
+ const candidates=doc.deployments.filter(d=>d.application_id===application&&d.name.startsWith(prefix)).sort((a,b)=>b.created_on-a.created_on);
+ if(!candidates.length || (candidates.length>1&&candidates[0].created_on===candidates[1].created_on))throw new Error("No unambiguous latest pipeline deployment");
+ $config={...$config,[role+"_deployment_id"]:candidates[0].id};
+}
+'''))
     for role in ['staging','production']:
         scope.append(request('Read_'+role+'_deployment','"/concert/core/api/v2/environments/"+$config.'+role+'_environment_id+"/deployments/"+$config.'+role+'_deployment_id+"/sbom"'))
     scope += [request('Read_build_artifacts','"/concert/core/api/v2/build_artifacts"'),fn('Select_service_artifact',r'''
@@ -77,7 +95,11 @@ $result={...$result,verification_scope:$config.policy.service+" current image in
 staging:{image:$stagingRuntime.image,artifact_id:$stagingRuntime.artifact,package_versions:[...new Set(stagingPackageRows.map(p=>p.version))],target_finding_rows:stagingTargetRows.length},
 production:{image:$productionRuntime.image,artifact_id:$productionRuntime.artifact,package_versions:[...new Set(productionPackageRows.map(p=>p.version))],target_finding_rows:productionTargetRows.length}}};
 ''')]
-    flow['blocks'][5:5]=scope
+    # Current image evidence supplies the CVE precondition; avoid a stale source-release snapshot.
+    original={b['name']:b for b in flow['blocks']}
+    assess=original['05_AssessPatch']
+    assess['function']=assess['function'].replace('$02_ReadConcertFindings','$Read_staging_cve_findings').replace('$03_ReadConcertInventory','$Read_staging_packages')
+    flow['blocks']=[original['ReadPolicyCatalog'],original['01_ValidatePolicy'],original['04_ReadSource'],*scope[:-1],assess,scope[-1],original['06_CreatePRWhenRequested'],original['07_VerifyAfterMerge']]
     def modify(xs):
         for block in xs:
             if block.get('name')=='VerifyDeploymentEvidence':
@@ -88,13 +110,15 @@ const bothFixed=Object.values(snapshots).every(e=>e.package_versions.length===1&
 const sameImages=snapshots.staging.image===snapshots.production.image;
 '''+code[end:]
                 code=code.replace('const ready=$alreadyFixed','const ready=bothFixed && sameImages && $alreadyFixed')
+                code=code.replace(' && packages.some(p=>p.version===$config.policy.to_version)','')
+                code=code.replace('$03_ReadConcertInventory','$Read_staging_packages').replace('$02_ReadConcertFindings','$Read_staging_cve_findings')
                 code=code.replace('open.length','remaining').replace('concert_package_versions:[...new Set(packages.map(p=>p.version))],','concert_package_versions:[...new Set(packages.map(p=>p.version))],same_image_in_both_environments:sameImages,')
                 code=code.replace('closure:ready && remaining===0?"verified":"not_closed"','closure:ready && remaining===0?"selected_service_verified":"not_closed"')
                 block['function']=code
             for key in ['then','else']:modify(block.get(key,[]))
     modify(flow['blocks'])
     flow['variables'] += [{'name':name,'isInput':False,'isOutput':False,'required':False,'level':'INTERMEDIATE','type':{'type':'any'},'value':'null'} for name in ['stagingRuntime','productionRuntime','targetBuildArtifact']]
-    flow['meta']['description']='Live CVE evidence in both deployments → allowlisted python-multipart patch PR → PR checks → staging tests → human approval → same images in production → verify current-image CVE absence. No automatic merge or approval.'
+    flow['meta']['description']='Live CVE evidence in both deployments → selected approved dependency patch PR → PR checks → staging tests → human approval → same images in production → verify current-image CVE absence. No automatic merge or approval.'
     return flow
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--config',required=True);p.add_argument('--output',required=True);a=p.parse_args()

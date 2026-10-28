@@ -125,12 +125,11 @@ def image_scan():
     for name,image in sorted(images.items(),key=lambda x:x[0]=='langflow'):
         print('Scanning image '+name,flush=True);result=scan(name,image);results.append(result);save('image-scans.json',results)
     # A patched release must prove the target CVEs absent in both source and its new image.
-    policy_paths=[ROOT/'scripts/patch-policy.json',*sorted((ROOT/'scripts/patch-policies').glob('*.json'))]
+    from patch_catalog import load_policies
+    policies=load_policies()
     patch_gates={}
-    for policy_path in policy_paths:
-        if not policy_path.exists():continue
-        policy=json.loads(policy_path.read_text())
-        if (policy['package']+'=='+policy['to_version']) in (ROOT/policy['file']).read_text().splitlines():
+    for policy in policies.values():
+        if (policy.get('requirement',policy['package'])+'=='+policy['to_version']) in (ROOT/policy['file']).read_text().splitlines():
             patch_spec=importlib.util.spec_from_file_location('patch_guard',ROOT/'scripts/verify-patch.py')
             patch_guard=importlib.util.module_from_spec(patch_spec);patch_spec.loader.exec_module(patch_guard)
             patch_gates[policy['package']]={name:patch_guard.validate_scan(json.loads((OUT/(name+'.trivy.json')).read_text()),policy=policy,source=name=='repository')

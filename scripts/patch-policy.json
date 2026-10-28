@@ -5,5 +5,16 @@
   "file": "services/langflow-ai-service/requirements.txt",
   "service": "langflow-ai-service",
   "branch": "concert-patch/requests-2.33.0",
-  "cves": ["CVE-2024-35195", "CVE-2024-47081", "CVE-2026-25645"]
+  "cves": [
+    "CVE-2024-35195",
+    "CVE-2024-47081",
+    "CVE-2026-25645"
+  ],
+  "fixed_versions": [
+    "2.32.0",
+    "2.32.4",
+    "2.33.0"
+  ],
+  "port": 8005,
+  "regression": "scripts/requests-regression.py"
 }

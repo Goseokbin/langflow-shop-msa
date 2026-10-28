@@ -1,0 +1,57 @@
+{
+  "requests": {
+    "package": "requests",
+    "from_version": "2.31.0",
+    "to_version": "2.33.0",
+    "file": "services/langflow-ai-service/requirements.txt",
+    "service": "langflow-ai-service",
+    "branch": "concert-patch/requests-2.33.0",
+    "cves": [
+      "CVE-2024-35195",
+      "CVE-2024-47081",
+      "CVE-2026-25645"
+    ],
+    "fixed_versions": [
+      "2.32.0",
+      "2.32.4",
+      "2.33.0"
+    ],
+    "port": 8005,
+    "regression": "scripts/requests-regression.py"
+  },
+  "jose": {
+    "package": "python-jose",
+    "requirement": "python-jose[cryptography]",
+    "from_version": "3.3.0",
+    "to_version": "3.5.0",
+    "file": "services/user-service/requirements.txt",
+    "service": "user-service",
+    "branch": "concert-patch/python-jose-3.5.0",
+    "cves": [
+      "CVE-2024-33664"
+    ],
+    "fixed_versions": [
+      "3.4.0"
+    ],
+    "advisory": "https://github.com/mpdavis/python-jose/releases/tag/3.4.0",
+    "port": 8001,
+    "regression": "scripts/jose-regression.py"
+  },
+  "multipart": {
+    "package": "python-multipart",
+    "from_version": "0.0.6",
+    "to_version": "0.0.32",
+    "file": "services/user-service/requirements.txt",
+    "service": "user-service",
+    "branch": "concert-patch/python-multipart-0.0.32",
+    "cves": [
+      "CVE-2024-53981"
+    ],
+    "fixed_versions": [
+      "0.0.18"
+    ],
+    "advisory": "https://github.com/Kludex/python-multipart/security/advisories/GHSA-59g5-xgcq-4qw3",
+    "port": 8001,
+    "regression": "scripts/multipart-regression.py"
+  }
+}

@@ -10,7 +10,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 POLICY = json.loads((ROOT / 'scripts/patch-policy.json').read_text())
 
 
-def build(config, policy=None):
+def build(config, policy=None, policies=None):
     policy = policy or POLICY
     required = ['repository', 'concert_host', 'application_api', 'source_repo_id', 'github_auth', 'concert_auth']
     if any(not config.get(k) for k in required):
@@ -18,6 +18,7 @@ def build(config, policy=None):
     if not config['application_api'].startswith('/concert/core/api/v2/applications/'):
         raise ValueError('Expected a scoped application version API path')
     cfg = {**config, 'policy': policy}
+
     def variable(name, value='null', **kw):
         return {'name': name, 'isInput': False, 'isOutput': False, 'required': False,
                 'level': 'INTERMEDIATE', 'type': {'type': 'any'}, 'value': value, **kw}
@@ -56,18 +57,18 @@ const p=$config.policy;
 $source=json($04_ReadSource.result);
 $before=Buffer.from($source.content.replace(/\\n/g,""),"base64").toString("utf8");
 $evidence=(findings.cve_findings||[]).filter(f=>f.package_name===p.package && f.package_version===p.from_version && p.cves.includes(f.cve));
-$alreadyFixed=$before.split(/\\r?\\n/).includes(p.package+"=="+p.to_version);
+$alreadyFixed=$before.split(/\\r?\\n/).includes((p.requirement||p.package)+"=="+p.to_version);
 $result={operation:$operation,package:p.package,from:p.from_version,to:p.to_version,file:p.file,
  target_cves:p.cves,concert_finding_rows:$evidence.length,status:$alreadyFixed?"source_already_patched":"patch_proposed"};
 if (!$alreadyFixed) {
  const found=[...new Set($evidence.map(f=>f.cve))];
  if (!p.cves.every(c=>found.includes(c))) throw new Error("Expected Concert CVE evidence is missing");
- if ($before.split(/\\r?\\n/).filter(l=>l===p.package+"=="+p.from_version).length!==1) throw new Error("Base dependency changed; review required");
- const allowedFixed=p.fixed_versions || ["2.32.0","2.32.4","2.33.0"];
+ if ($before.split(/\\r?\\n/).filter(l=>l===(p.requirement||p.package)+"=="+p.from_version).length!==1) throw new Error("Base dependency changed; review required");
+ const allowedFixed=p.fixed_versions;
  const approvedFix=f=>allowedFixed.some(v=>f.fixed_version==="Upgrade "+p.package+" to version "+v);
  if ($evidence.some(f=>f.fixed_version && !approvedFix(f)) || !p.cves.every(c=>$evidence.some(f=>f.cve===c && approvedFix(f)))) throw new Error("Fix recommendation changed; review required");
  $result.missing_fix_metadata_rows=$evidence.filter(f=>!f.fixed_version).length;
- $after=$before.replace(p.package+"=="+p.from_version,p.package+"=="+p.to_version);
+ $after=$before.replace((p.requirement||p.package)+"=="+p.from_version,(p.requirement||p.package)+"=="+p.to_version);
 }
 '''),
     {'action': 'if', 'name': '06_CreatePRWhenRequested', 'condition': '["create-pr","auto"].includes($operation) && !$alreadyFixed', 'then': [
@@ -119,11 +120,34 @@ $result={...$result,status:ready?(open.length?"deployment_verified_concert_findi
  source_version_verified:$alreadyFixed,source_matches_deployed_release:sourceMatchesRelease,concert_package_versions:[...new Set(packages.map(p=>p.version))],
  remaining_concert_target_rows:open.length,closure:ready && open.length===0?"verified":"not_closed"};
 ''')], 'else': []}]
+    extra_variables=[]
+    if policies:
+        default='multipart'
+        extra_variables=[variable('policy_id',json.dumps(default),isInput=True,type={'type':'string'})]
+        blocks[0]['function']=r'''
+if (!["plan","create-pr","verify","auto"].includes($operation)) throw new Error("Unsupported operation");
+if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test($config.repository)) throw new Error("Invalid repository");
+if ($ReadPolicyCatalog.statusCode!==200)throw new Error("Cannot read reviewed policy catalog");
+const file=typeof $ReadPolicyCatalog.result==="string"?JSON.parse($ReadPolicyCatalog.result):$ReadPolicyCatalog.result;
+const approved=JSON.parse(Buffer.from(file.content.replace(/\n/g,""),"base64").toString("utf8"));
+if (!Object.prototype.hasOwnProperty.call(approved,$policy_id)) throw new Error("Unknown approved policy");
+const p=approved[$policy_id];
+if(!/^[a-z0-9-]+$/.test(p.service)||p.file!=="services/"+p.service+"/requirements.txt")throw new Error("Unsupported patch file");
+if(!/^[a-z0-9][a-z0-9.-]*$/.test(p.package))throw new Error("Invalid package");
+const requirement=p.requirement||p.package;
+if(requirement!==p.package&&(!requirement.startsWith(p.package+"[")||!/^[-a-zA-Z0-9.,_]+$/.test(requirement.slice(p.package.length+1,-1))||!requirement.endsWith("]")))throw new Error("Invalid requirement");
+if(![p.from_version,p.to_version,...p.fixed_versions].every(v=>/^\d+(?:\.\d+)+(?:[a-zA-Z0-9.-]*)$/.test(v)))throw new Error("Invalid approved versions");
+if(!p.cves.length||!p.cves.every(c=>/^CVE-\d{4}-\d{4,}$/.test(c))||!/^concert-patch\/[a-zA-Z0-9._-]+$/.test(p.branch))throw new Error("Invalid CVE or patch branch");
+$config={...$config,policy:p};
+$policyCatalogCommit=file.sha;
+'''
+        blocks[4]['function']=blocks[4]['function'].replace('$result={operation:$operation,','$result={policy_id:$policy_id,policy_catalog_blob:$policyCatalogCommit,operation:$operation,')
+        blocks.insert(0,gh('ReadPolicyCatalog',prefix+' + \"/contents/scripts/remediation-policies.json\"',query='{\"ref\":\"main\"}'))
     return {'name':config.get('workflow_name','Langflow Package Patch Demo'),'platform':'node',
         'meta':{'version':5,'layout':'flow','workerGroup':'default','description':'Plan → constrained package patch PR → PR checks → review/merge → existing deployment pipeline → evidence verification. No automatic merge.'},
         'variables':[variable('operation','"plan"',isInput=True,type={'type':'string','enum':['plan','create-pr','verify','auto']}),
-            variable('config',json.dumps(cfg)),variable('result','{}',isOutput=True)]+
-            [variable(n) for n in ['source','before','after','evidence','alreadyFixed','existing','main','branchSource','needsCommit','releaseRun']],
+            variable('config',json.dumps(cfg)),variable('result','{}',isOutput=True)]+extra_variables+
+            [variable(n) for n in ['source','before','after','evidence','alreadyFixed','existing','main','branchSource','needsCommit','releaseRun','policyCatalogCommit']],
         'blocks':blocks}
 
 
