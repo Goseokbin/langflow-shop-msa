@@ -64,7 +64,9 @@ if (!$alreadyFixed) {
  if (!p.cves.every(c=>found.includes(c))) throw new Error("Expected Concert CVE evidence is missing");
  if ($before.split(/\\r?\\n/).filter(l=>l===p.package+"=="+p.from_version).length!==1) throw new Error("Base dependency changed; review required");
  const allowedFixed=p.fixed_versions || ["2.32.0","2.32.4","2.33.0"];
- if ($evidence.some(f=>!allowedFixed.some(v=>f.fixed_version==="Upgrade requests to version "+v))) throw new Error("Fix recommendation changed; review required");
+ const approvedFix=f=>allowedFixed.some(v=>f.fixed_version==="Upgrade "+p.package+" to version "+v);
+ if ($evidence.some(f=>f.fixed_version && !approvedFix(f)) || !p.cves.every(c=>$evidence.some(f=>f.cve===c && approvedFix(f)))) throw new Error("Fix recommendation changed; review required");
+ $result.missing_fix_metadata_rows=$evidence.filter(f=>!f.fixed_version).length;
  $after=$before.replace(p.package+"=="+p.from_version,p.package+"=="+p.to_version);
 }
 '''),
