@@ -106,11 +106,13 @@ def production_document(release,config,inventory):
                 actual=get('deployment',name)
                 value['properties']=[{'name':'workload.type','value':'Deployment'},
                   {'name':'metadata','value':json.dumps({'name':name,'namespace':NS,'replicas':1,'containers':actual['spec']['template']['spec']['containers']})},
-                  {'name':'source.commit','value':release['commit']},{'name':'promotion.run','value':os.environ['GITHUB_RUN_ID']}]
+                  {'name':'source.commit','value':release['commit']},{'name':'promotion.run','value':os.environ['GITHUB_RUN_ID']},
+                  {'name':'runtime.image.pull_reference','value':images[name]['pull_image']},
+                  {'name':'promotion.verified_digest','value':images[name]['digest']}]
             elif typ=='image' and name in images:
                 value['uri']=images[name]['source_image']
-                value['properties']=[{'name':'runtime.image.pull_reference','value':images[name]['pull_image']},
-                  {'name':'promotion.verified_digest','value':images[name]['digest']}]
+                # CDEF image nodes allow uri, not properties. Evidence belongs to the workload.
+                value.pop('properties',None)
             for k,x in list(value.items()):
                 if k not in ['properties']:update(x)
         elif isinstance(value,list):
@@ -129,7 +131,9 @@ def production_document(release,config,inventory):
 def main(args):
     if os.environ.get('DEPLOYMENT_TIER')!='production':raise ValueError('This command requires the protected production job')
     release=unseal(args.release,args.expected_sha256,os.environ['PROMOTION_STATE_KEY'])
-    if release['commit']!=os.environ['GITHUB_SHA'] or release['run_id']!=os.environ['GITHUB_RUN_ID']:
+    source_commit=args.source_commit or os.environ['GITHUB_SHA']
+    source_run=args.source_run or os.environ['GITHUB_RUN_ID']
+    if release['commit']!=source_commit or release['run_id']!=source_run:
         raise ValueError('Release belongs to another commit/run')
     config=get('configmap','langflow-shop-pipeline-config')['data']
     server=oc('whoami','--show-server')
@@ -200,4 +204,6 @@ def main(args):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--release',type=Path,required=True);p.add_argument('--expected-sha256',required=True)
+    p.add_argument('--source-commit',help='Verified original build commit for deployment-only recovery')
+    p.add_argument('--source-run',help='Verified original build run for deployment-only recovery')
     main(p.parse_args())

@@ -39,6 +39,8 @@ class PromotionPipelineTests(unittest.TestCase):
         self.assertEqual(doc['dependencies'][0]['dependsOn'],[cluster['bom-ref']])
         self.assertEqual(cluster['components'][0]['name'],'shopping-mall-prod')
         self.assertEqual(cluster['components'][0]['components'][0]['uri'],image['source_image'])
+        self.assertNotIn('properties',cluster['components'][0]['components'][0],
+                         'Concert CDEF rejects properties on image nodes')
 
     def test_docker_hub_alias_and_registry_port_have_one_scanner_identity(self):
         d='sha256:'+'a'*64

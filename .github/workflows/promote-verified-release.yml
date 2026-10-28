@@ -1,0 +1,116 @@
+name: Langflow shop · 승인 릴리스 운영 재배포
+on:
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: '01–10 검증을 통과한 기존 DevSecOps run ID (이미지 재빌드 없음)'
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: langflow-shop-devsecops
+  cancel-in-progress: false
+jobs:
+  resolve:
+    name: R1 · 기존 검증 실행 및 릴리스 확인
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+      release_sha256: ${{ steps.release.outputs.release_sha256 }}
+    steps:
+      - name: Require original main pipeline and successful checks 01–10
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_RUN: ${{ inputs.source_run }}
+        shell: python
+        run: |
+          import json,os,re,subprocess
+          run=os.environ['SOURCE_RUN'];repo=os.environ['REPOSITORY']
+          assert re.fullmatch(r'[0-9]+',run), 'Run ID must be numeric'
+          def api(path):return json.loads(subprocess.check_output(['gh','api',f'repos/{repo}/actions/'+path]))
+          source=api('runs/'+run)
+          assert source['path']=='.github/workflows/concert-devsecops.yml' and source['head_branch']=='main'
+          assert source['head_repository']['full_name']==repo and source['event'] in ['push','workflow_dispatch']
+          jobs=api('runs/'+run+'/jobs?per_page=100')['jobs']
+          for number in range(1,11):
+              matches=[j for j in jobs if j['name'].startswith(f'{number:02d} · ')]
+              assert len(matches)==1 and matches[0]['conclusion']=='success', f'Check {number:02d} did not pass'
+          sha=source['head_sha'];assert re.fullmatch(r'[0-9a-f]{40}',sha)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('commit='+sha+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write(f'원본 검증 실행: {run} · commit `{sha}`. 이미지 재빌드 없이 동일 릴리스를 운영에 적용합니다.\n')
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: demo-smoke
+          run-id: ${{ inputs.source_run }}
+          github-token: ${{ github.token }}
+          path: original-smoke
+      - name: Read verified release hash
+        id: release
+        shell: python
+        run: |
+          import json,os,re
+          digest=json.load(open('original-smoke/smoke.json'))['promotion_release']['sha256']
+          assert re.fullmatch(r'[0-9a-f]{64}',digest)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:f.write('release_sha256='+digest+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:f.write(f'승인 대상 release.enc SHA-256: `{digest}`. 다음 job은 production 승인을 기다립니다.\n')
+  production:
+    name: 11 · 운영 배포 — 승인 필요
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment:
+      name: production
+    env:
+      OPENSHIFT_SERVER: ${{ secrets.PROD_OPENSHIFT_SERVER }}
+      OPENSHIFT_TOKEN: ${{ secrets.PROD_OPENSHIFT_TOKEN }}
+      OPENSHIFT_CA: ${{ secrets.PROD_OPENSHIFT_CA }}
+      CONCERT_AUTH_HEADER: ${{ secrets.PROD_CONCERT_AUTH_HEADER }}
+      SHOP_NAMESPACE: shopping-mall-prod
+      DEPLOYMENT_TIER: production
+      PROMOTION_STATE_KEY: ${{ secrets.PROMOTION_STATE_KEY }}
+      SOURCE_COMMIT: ${{ needs.resolve.outputs.commit }}
+      SOURCE_RUN: ${{ inputs.source_run }}
+      RELEASE_SHA256: ${{ needs.resolve.outputs.release_sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Install OpenShift CLI
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/promotion-tools"
+          curl -fsSL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.38/openshift-client-linux.tar.gz -o "$RUNNER_TEMP/oc.tgz"
+          tar -xzf "$RUNNER_TEMP/oc.tgz" -C "$RUNNER_TEMP/promotion-tools" oc
+          echo "$RUNNER_TEMP/promotion-tools" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: verified-release
+          run-id: ${{ inputs.source_run }}
+          github-token: ${{ github.token }}
+          path: .runtime/approved-release
+      - name: Authenticate after human approval
+        shell: bash
+        run: |
+          set -eu
+          umask 077
+          printf '%s' "$OPENSHIFT_CA" > "$RUNNER_TEMP/production-ca.pem"
+          oc login --server="$OPENSHIFT_SERVER" --token="$OPENSHIFT_TOKEN" --certificate-authority="$RUNNER_TEMP/production-ca.pem" >/dev/null
+      - name: Promote the exact tested digests · verify commerce · ingest production
+        run: python3 scripts/promote-release.py --release .runtime/approved-release/release.enc --expected-sha256 "$RELEASE_SHA256" --source-commit "$SOURCE_COMMIT" --source-run "$SOURCE_RUN"
+      - name: Publish production verification
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: demo-production
+          path: .runtime/production/verification.json
+          if-no-files-found: ignore
+          retention-days: 14
+          overwrite: true
+      - name: Remove temporary credentials
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$HOME/.kube/config" "$RUNNER_TEMP/production-ca.pem" .runtime/production/authorization

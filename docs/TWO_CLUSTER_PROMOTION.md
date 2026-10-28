@@ -121,3 +121,13 @@ data:
 | Concert에 운영 배포 없음 | 11의 기능 검사 및 Deploy SBOM 수집 완료 확인 |
 
 실패하면 성공으로 표시하지 않습니다. 일부 워크로드가 시작된 상태로 실패할 수 있으므로 해당 job 로그와 운영 Deployment를 확인합니다. 이 데모에는 자동 DB 롤백이나 무중단·고가용성 구성이 포함돼 있지 않습니다.
+
+## 실패한 운영 단계만 복구하기
+
+클러스터나 Concert 수집기를 고친 뒤에는 이미지를 다시 빌드할 필요가 없습니다. Actions의 **Langflow shop · 승인 릴리스 운영 재배포**에서 `source_run`에 기존 DevSecOps 실행 ID를 넣습니다.
+
+R1은 같은 저장소 main의 원본 파이프라인인지, 01–10 검증이 모두 성공했는지 확인하고 원본 `demo-smoke`의 릴리스 해시를 읽습니다. 이후 production 승인자는 원본 commit·릴리스 해시를 검토합니다. 승인 후 원본 `verified-release`를 내려받아 해시·HMAC·원본 commit/run을 검증하고 동일한 digest 9개만 운영에 적용합니다. 이미지를 새로 만들거나 검증하지 않은 릴리스로 교체하지 않습니다.
+
+배포 도구 수정 commit과 실제 앱의 원본 commit은 다를 수 있습니다. 운영 Deployment 주석의 `promoted-commit`과 보고서의 `commit/source_run`은 원본 앱을, 워크플로우 실행은 복구 도구 버전을 가리킵니다. `demo-production`에서 기능 검사·이미지 일치·Concert 수집 완료를 확인합니다.
+
+Concert CDEF의 이미지 노드에는 `uri`를 기록합니다. 실제 레지스트리 pull 주소와 검증 digest 같은 `properties`는 상위 Deployment 노드에 기록합니다. 이미지 노드의 미지원 필드를 추가하면 업로드 접수 후 스키마 처리 단계에서 실패할 수 있습니다.
