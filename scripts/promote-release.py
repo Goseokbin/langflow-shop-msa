@@ -92,6 +92,7 @@ def production_document(release,config,inventory):
         elif isinstance(value,str):return mapping.get(value,value)
         return value
     remap(doc)
+    doc['environment']['name']=config['CONCERT_ENVIRONMENT_NAME']
     images={r['name']:r for r in release['images']}
     def update(value):
         if isinstance(value,dict):

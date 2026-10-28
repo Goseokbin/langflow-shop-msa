@@ -1,6 +1,9 @@
 """Promotion must fail closed on digest replacement, missing checks and modified evidence."""
 import copy
 import hashlib
+import importlib.util
+import os
+from unittest.mock import patch
 from pathlib import Path
 import tempfile
 import unittest
@@ -17,6 +20,25 @@ def release():
 
 
 class PromotionPipelineTests(unittest.TestCase):
+    def test_production_model_keeps_canonical_image_and_separates_environment(self):
+        spec=importlib.util.spec_from_file_location('promote',Path(__file__).parent/'promote-release.py')
+        promote=importlib.util.module_from_spec(spec);spec.loader.exec_module(promote)
+        r=release();image=r['images'][0];name=image['name'];r.update(application_name='langflow-shop',application_version='1.0.0')
+        r['deployment_sbom']={'metadata':{},'environment':{'name':'stage','bom-ref':'environment:stage'},
+          'runtime-components':[{'bom-ref':'infra:cluster:stage','type':'kubernetes','name':'stage','components':[
+            {'bom-ref':'infra:ns:stage','type':'namespace','name':'shopping-mall','components':[
+             {'type':'image','name':name,'uri':image['source_image']}]}]}],
+          'services':[],'dependencies':[{'ref':'environment:stage','dependsOn':['infra:cluster:stage']} ]}
+        config={'CONCERT_ENVIRONMENT_NAME':'production','PRODUCTION_CLUSTER_NAME':'prod-cluster','PRODUCTION_CLUSTER_ID':'prod-id','PRODUCTION_SERVER':'https://prod'}
+        with patch.dict(os.environ,{'GITHUB_RUN_ID':'123'}):
+            doc=promote.production_document(r,config,{'services':[]})
+        self.assertEqual(doc['environment'],{'name':'production','bom-ref':'environment:production'})
+        cluster=doc['runtime-components'][0]
+        self.assertEqual(cluster['api-server'],'https://prod')
+        self.assertEqual(doc['dependencies'][0]['dependsOn'],[cluster['bom-ref']])
+        self.assertEqual(cluster['components'][0]['name'],'shopping-mall-prod')
+        self.assertEqual(cluster['components'][0]['components'][0]['uri'],image['source_image'])
+
     def test_authenticated_round_trip_and_tamper(self):
         with tempfile.TemporaryDirectory() as td:
             path=Path(td)/'release.enc';key='c'*64;original=release()
