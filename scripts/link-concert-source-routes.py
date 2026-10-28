@@ -14,6 +14,7 @@ import subprocess
 import urllib.request
 
 from concert_image_identity import identity
+from concert_internal_endpoints import collect, compact_properties, enrich, verify_document
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = ROOT / '.runtime/source-route-links'
@@ -68,9 +69,14 @@ def main():
     deploy=client.request(f'/concert/core/api/v2/environments/{ENV_ID}/deployments/{DEPLOY_ID}/sbom')
     (OUT/'before-application.json').write_text(json.dumps(app,indent=2))
     (OUT/'before-deployment.json').write_text(json.dumps(deploy,indent=2))
+    compact_properties(app)
+    compact_properties(deploy)
     builds=[] if args.build_evidence_file else oc('builds')
     external_builds={b['name']:b for b in json.loads(pathlib.Path(args.build_evidence_file).read_text())} if args.build_evidence_file else {}
     routes,deployments=oc('routes'),oc('deployments')
+    internal = collect(oc('services'), OUT)
+    enrich(app, internal)
+    enrich(deploy, internal, deployment=True)
     images={d['metadata']['name']:identity(d['spec']['template']['spec']['containers'][0]['image']) for d in deployments}
     remote=args.repo_url or subprocess.check_output(['git','remote','get-url','origin'],cwd=ROOT,text=True).strip().removesuffix('.git')
     from urllib.parse import urlparse
@@ -154,6 +160,7 @@ def main():
     appfile=OUT/'application.cdef.json';appfile.write_text(json.dumps(app,indent=2))
     depfile=OUT/'deployment.cdef.json';depfile.write_text(json.dumps(deploy,indent=2))
     report={'repository':remote,'branch':branch,'provenance':records,'public_services':public,
+            'internal_endpoints':internal,
             'revision_limit':('Repository SCA is branch-scoped; the build commit is verified in OCI labels and deployment evidence.' if args.build_evidence_file else 'Binary builds have no recorded commit SHA; branch association is declared, not commit attestation.')}
     (OUT/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
     print(json.dumps({'builds':len(records),'routes':len(public),'apply':args.apply}),flush=True)
@@ -163,5 +170,9 @@ def main():
             (OUT/(file.stem+'.ingestion.json')).write_text(json.dumps(response,indent=2))
             client.wait_for_upload(response)
             print('Processed '+file.name,flush=True)
+        verify_document(client.request(api.APP+'/sbom'), internal)
+        verify_document(client.request(f'/concert/core/api/v2/environments/{ENV_ID}/deployments/{DEPLOY_ID}/sbom'), internal, deployment=True)
+        print(json.dumps({'internal_openapi_verified':True,'api_services':internal['api_services'],
+                          'api_paths':internal['api_paths'],'internal_endpoints':internal['endpoint_count']}),flush=True)
 
 if __name__=='__main__':main()

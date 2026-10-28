@@ -9,6 +9,7 @@ import datetime
 import json
 import pathlib
 from concert_image_identity import identity
+from concert_internal_endpoints import collect, enrich
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 p = argparse.ArgumentParser()
@@ -51,7 +52,6 @@ for service in services:
                                 {'name': 'kubernetes.namespace', 'value': 'shopping-mall'},
                                 {'name': 'source', 'value': 'Kubernetes Service snapshot'}]})
     doc['dependencies'].append({'ref': ref, 'dependsOn': [sr]})
-a.output.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + '\n')
 
 
 if a.kind == 'deploy':
@@ -75,7 +75,7 @@ if a.kind == 'deploy':
         port = next(x for x in services if x['metadata']['name'] == name)['spec']['ports'][0]['port']
         item = dict(service)
         item['network_exposure'] = item.pop('network-exposure')
-        item['base-url'] = item['endpoints'][0]
+        item['base-url'] = f"{'tcp' if name == 'postgresql' else 'http'}://{name}.shopping-mall.svc:{port}"
         item['port'] = port
         deploy['services'].append(item)
         dependency = next((x for x in deploy['dependencies'] if x['ref'] == image['bom-ref']), None)
@@ -83,6 +83,8 @@ if a.kind == 'deploy':
             dependency = {'ref': image['bom-ref'], 'dependsOn': []}
             deploy['dependencies'].append(dependency)
         dependency['dependsOn'].append(item['bom-ref'])
-    a.output.write_text(json.dumps(deploy, ensure_ascii=False, indent=2) + '\n')
 
-print(json.dumps({'kind': a.kind, 'components': len(kept), 'services': len(doc['services']), 'output': str(a.output)}))
+inventory = collect(services, a.output.parent / 'internal-openapi')
+enrich(deploy if a.kind == 'deploy' else doc, inventory, deployment=a.kind == 'deploy')
+a.output.write_text(json.dumps(deploy if a.kind == 'deploy' else doc, ensure_ascii=False, indent=2) + '\n')
+print(json.dumps({'kind': a.kind, 'components': len(kept), 'services': len(doc['services']), 'api_paths':inventory['api_paths'], 'output': str(a.output)}))

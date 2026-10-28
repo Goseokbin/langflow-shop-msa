@@ -104,7 +104,8 @@ def smoke(stages,manifest):
     verification=read('verification.json')
     public={'run_url':run_url(),'git_commit':manifest['git_base_commit'],'source_snapshot_sha256':manifest['archive_sha256'],
             'repository':verification['repository'],'images':[{k:v for k,v in row.items() if k in ['name','packages','cves','os_unsupported']} for row in verification['images']],
-            'topology_counts':verification['topology_counts'],'sast':read('sast-verification.json'),'commerce_smoke':'passed','oci_revision_verified_images':len(read('builds.json',[]))}
+            'topology_counts':verification['topology_counts'],'internal_endpoints':verification['internal_endpoints'],
+            'sast':read('sast-verification.json'),'commerce_smoke':'passed','oci_revision_verified_images':len(read('builds.json',[]))}
     stages.save('public-verification.json',public)
     stages.event('smoke','succeeded',checks=len(result['results']))
 
@@ -154,7 +155,10 @@ def report(stage,outcome):
         data['deployments']=read('deployment-verification.json')
         text += [table(['Deployment','배포 digest','Ready'],[[b['name'],'`'+b['digest']+'`',b['ready']] for b in data['deployments']]),'확인 위치: OpenShift → shopping-mall → Deployments. 07에서 Concert의 관계를 대조합니다.']
     elif stage=='link-verify' and read('verification.json'):
-        d=read('verification.json');data.update({'repository':d['repository'],'topology_counts':d['topology_counts']})
+        d=read('verification.json');data.update({'repository':d['repository'],'topology_counts':d['topology_counts'],'internal_endpoints':d['internal_endpoints']})
+        text += ['### 내부 OpenAPI 엔드포인트 수집 · Concert 대조',
+                 table(['서비스','수집 유형','경로 수','HTTP operation 수'],[[r['name'],r['kind'],r['paths'],r['operations']] for r in d['internal_endpoints']['services']]),
+                 '내부 주소는 액세스 지점으로 유지하고 실제 OpenAPI 경로를 엔드포인트로 수집합니다. 동일 경로의 GET/POST는 경로 1개, operation 2개입니다. 웹 화면은 루트, PostgreSQL은 TCP 접속점으로 구분합니다.']
         text += [table(['Concert 확인 항목','조회 결과'],[['저장소 패키지',d['repository']['packages']],['CVE 발견 행',d['repository']['cves']],['고유 CVE·패키지·버전 조합',d['repository'].get('unique_cve_package_version_combinations','미조회')],*d['topology_counts'].items()]),'확인 위치: Concert → langflow-shop 1.0.0 → 저장소 → 사용된 패키지 / CVE 찾은 결과 / 결과 빌드 아티팩트.', '저장소 SCA는 branch 범위입니다. 반복 발견 행과 고유 조합을 구분합니다. 정확한 커밋은 이미지 OCI label 및 Deployment 주석으로 검증합니다.']
     elif stage=='smoke' and read('smoke.json'):
         data['commerce_checks']=read('smoke.json');data['verification']=read('public-verification.json')

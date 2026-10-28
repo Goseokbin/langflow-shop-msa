@@ -4,6 +4,8 @@ main push 또는 workflow_dispatch에서 GitHub hosted runner가 소스 스캔 �
 
 ## 설정
 
+내부 API 경로 수집에는 관리자가 최초 한 번 `oc apply -f openshift/internal-openapi-rbac.json`을 적용합니다. 09 연결 검증에서 배포된 내부 서비스 7개의 OpenAPI를 조회하고 Concert 반영 결과를 대조합니다. 서비스별 경로 수는 `demo-link-verify` 보고서에 표시합니다. [설정과 확인 방법](INTERNAL_API_ENDPOINTS.md)을 참고합니다.
+
 Repository Secrets는 OPENSHIFT_SERVER, OPENSHIFT_TOKEN, OPENSHIFT_CA, CONCERT_AUTH_HEADER다. namespace 전용 CI ServiceAccount로 인증하며 관리자 토큰을 사용하지 않는다. namespace의 Deployment 변경, Pod·Service·Route 조회, 설정 ConfigMap 조회 및 system:image-builder 권한을 부여한다.
 
 ConfigMap langflow-shop-pipeline-config에는 CONCERT_HOST, CONCERT_APP_API, CONCERT_ENVIRONMENT_ID, CONCERT_DEPLOYMENT_ID, CONCERT_PREVIOUS_REPO_URL, DOCKER_REGISTRY_HOST를 설정한다. 레지스트리 값은 https:// 없이 외부에서 접근 가능한 인증된 호스트다. 테스트 클러스터는 내부 image-registry Service에 reencrypt TLS Route를 추가했다. API와 레지스트리 TLS 검증을 유지한다.

@@ -85,6 +85,7 @@ def main():
       obj('RoleBinding','langflow-shop-pipeline',apiVersion='rbac.authorization.k8s.io/v1',roleRef={'apiGroup':'rbac.authorization.k8s.io','kind':'Role','name':'langflow-shop-pipeline'},subjects=[{'kind':'ServiceAccount','name':SA,'namespace':NS}]),
       obj('RoleBinding','langflow-shop-pipeline-image-puller',apiVersion='rbac.authorization.k8s.io/v1',roleRef={'apiGroup':'rbac.authorization.k8s.io','kind':'ClusterRole','name':'system:image-puller'},subjects=[{'kind':'ServiceAccount','name':SA,'namespace':NS}]),
       obj('Task','langflow-shop-devsecops-stage',apiVersion='tekton.dev/v1',spec={'params':[{'name':'stage','type':'string'}],'workspaces':workspace,'steps':[step],'volumes':volumes})]
+    resources.extend(json.loads((ROOT/'openshift/internal-openapi-rbac.json').read_text())['items'])
     prep_steps=[]
     for name,img,path in [('oc',cli,'/usr/bin/oc'),('trivy','docker.io/aquasec/trivy:0.75.0','/usr/local/bin/trivy')]:
         prep_steps.append({'name':'copy-'+name,'image':img,'script':f'#!/bin/sh\nset -eu\nmkdir -p /workspace/shared/tools\ncp -L {path} /workspace/shared/tools/{name}\nchmod 755 /workspace/shared/tools/{name}\n','securityContext':security})

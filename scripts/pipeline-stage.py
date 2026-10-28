@@ -185,8 +185,12 @@ def link_verify():
         if not result['os_unsupported'] and result['vulnerabilities'] and not cv:raise RuntimeError('Image CVEs absent: '+name)
         verified.append({'name':result['name'],'id':art['id'],'image':result['image'],'packages':count,'cves':cv,'os_unsupported':result['os_unsupported']})
     topo=client.request(api.APP+'/topology')
+    internal=json.loads((ROOT/'.runtime/source-route-links/internal-endpoints.json').read_text())
     report={'run_id':MANIFEST['run_id'],'source_snapshot_sha256':MANIFEST['archive_sha256'],'git_base_commit':MANIFEST['git_base_commit'],'dirty':MANIFEST['dirty'],
             'repository':{'id':repo['id'],'packages':packages,'cves':cves,'scope':'branch','scanned_commit':MANIFEST['git_base_commit']},'images':verified,
+            'internal_endpoints':{'api_services':internal['api_services'],'api_paths':internal['api_paths'],
+                 'endpoint_count':internal['endpoint_count'],'verified':True,
+                 'services':[{k:r[k] for k in ['name','kind']} | {'paths':len(r['endpoints']),'operations':len(r['operations'])} for r in internal['services']]},
             'topology_counts':{k:len(topo[k]) for k in ['source_repos','build_artifacts','public_services','private_services','public_access_points']}}
     save('verification.json',report);event('link-verify','succeeded',**report)
 
