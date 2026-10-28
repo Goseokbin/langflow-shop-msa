@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 
-from concert_internal_endpoints import collect, compact_properties, enrich, verify_document
+from concert_internal_endpoints import collect, compact_properties, enrich, restore_application_services, verify_document
 
 
 def main():
@@ -24,10 +24,15 @@ def main():
     services = json.loads(subprocess.check_output(['oc','get','services','-n','shopping-mall','-o','json']))['items']
     inventory = collect(services, args.output_dir)
     documents = []
+    definitions = {}
     for name, path, deployment in [('application',api.APP,False),('deployment',deploy_api,True)]:
         document = client.request(path+'/sbom')
         (args.output_dir/(name+'.before.json')).write_text(json.dumps(document, indent=2)+'\n')
         compact_properties(document)
+        definitions[name] = document
+    inventory['restored_application_services'] = restore_application_services(definitions['application'], definitions['deployment'], inventory)
+    for name, path, deployment in [('application',api.APP,False),('deployment',deploy_api,True)]:
+        document = definitions[name]
         enrich(document, inventory, deployment=deployment)
         document['metadata']['timestamp'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         file = args.output_dir/(name+'.cdef.json')

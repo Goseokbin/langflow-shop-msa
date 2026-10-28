@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from concert_internal_endpoints import API_PORTS, OTHER_PORTS, collect, compact_properties, enrich, parse_paths, verify_document
+from concert_internal_endpoints import API_PORTS, OTHER_PORTS, collect, compact_properties, enrich, parse_paths, restore_application_services, verify_document
 
 
 class EndpointInventoryTests(unittest.TestCase):
@@ -54,6 +54,21 @@ class EndpointInventoryTests(unittest.TestCase):
     def test_missing_service_is_not_created_with_an_unrelated_identity(self):
         with tempfile.TemporaryDirectory() as td:report=self.inventory(Path(td))
         with self.assertRaises(ValueError):enrich({'services':[]},report)
+
+    def test_image_replacement_restores_only_observed_deployment_services_and_edges(self):
+        with tempfile.TemporaryDirectory() as td:report=self.inventory(Path(td))
+        app={'components':[{'name':r['name'],'components':[{'type':'image','bom-ref':'image:'+r['name']}]} for r in report['services']],
+             'services':[{'name':'frontend-public','network-exposure':'public','endpoints':['/']}],
+             'dependencies':[{'ref':'image:frontend','dependsOn':['service:frontend-public']}]}
+        deploy={'services':[{'name':r['name'],'bom-ref':'existing:'+r['name'],'network_exposure':'private','endpoints':[r['base_url']]} for r in report['services']]}
+        self.assertEqual(len(restore_application_services(app,deploy,report)),9)
+        self.assertEqual(restore_application_services(app,deploy,report),[])
+        edge=next(d for d in app['dependencies'] if d['ref']=='image:frontend')
+        self.assertEqual(set(edge['dependsOn']),{'service:frontend-public','existing:frontend'})
+        enrich(app,report);verify_document(app,report)
+        self.assertEqual(app['services'][0]['endpoints'],['/'])
+        deploy['services']=[]
+        with self.assertRaises(ValueError):restore_application_services(app,deploy,report)
 
 
 if __name__=='__main__':unittest.main()

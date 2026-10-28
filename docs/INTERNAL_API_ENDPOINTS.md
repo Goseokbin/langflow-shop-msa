@@ -19,10 +19,10 @@ oc apply -f openshift/internal-openapi-rbac.json
 1. 배포된 Kubernetes Service 이름·포트를 확인합니다.
 2. OpenShift API를 통해 각 내부 서비스의 `/openapi.json`을 조회합니다.
 3. HTTP operation이 선언된 경로만 추출합니다. GET/POST가 같은 경로를 공유하면 경로는 하나, operation은 둘로 계산합니다.
-4. 기존 서비스의 참조와 base-url을 유지하면서 application/deployment SBOM의 endpoints를 실제 경로로 교체합니다.
+4. 새 이미지 수집으로 애플리케이션의 서비스 관계가 빠진 경우, 실제 Service와 기존 배포 정의·애플리케이션 이미지 참조를 대조해 동일한 서비스 참조로 복원합니다. 참조나 이미지가 모호하면 실패합니다. 기존 base-url을 유지하면서 application/deployment SBOM의 endpoints를 실제 경로로 교체합니다.
 5. Concert 수집 완료 후 다시 내보낸 두 SBOM의 경로 집합과 액세스 주소를 대조합니다.
 
-OpenAPI 조회나 파싱, 반영 검증이 실패하면 해당 단계가 실패합니다. 주소 하나로 조용히 대체하지 않습니다. 원본 스키마와 해시는 보호된 파이프라인 작업 파일에 보관하며, 공개 데모 보고서에는 서비스별 경로·operation 수와 검증 결과를 표시합니다.
+OpenAPI 조회나 파싱, 반영 검증이 실패하면 해당 단계가 실패합니다. 주소 하나로 조용히 대체하지 않습니다. 원본 스키마는 해당 job의 임시 작업 공간에 저장하고 해시는 Concert 서비스 속성에 기록합니다. 공개 데모 보고서에는 서비스별 경로·operation 수와 검증 결과를 표시합니다.
 
 ## 수집 범위
 

@@ -119,6 +119,39 @@ def enrich(document, inventory, deployment=False):
     return document
 
 
+def restore_application_services(application, deployment, inventory):
+    """New image digests can lose app service edges; reuse the existing deployment identities."""
+    restored = []
+    for row in inventory['services']:
+        templates = [s for s in deployment.get('services', [])
+                     if s['name'] == row['name'] and s.get('network_exposure') == 'private']
+        components = [c for c in application['components'] if c['name'] == row['name']]
+        if len(templates) != 1 or len(components) != 1:
+            raise ValueError('Cannot prove deployment service/application component identity: ' + row['name'])
+        images = [c for c in components[0].get('components', []) if c.get('type') == 'image']
+        if len(images) != 1:
+            raise ValueError('Expected one application image for internal service: ' + row['name'])
+        template = templates[0]
+        matches = [s for s in application.setdefault('services', []) if s['name'] == row['name']]
+        if len(matches) > 1 or (matches and (matches[0].get('network-exposure') != 'private'
+                                          or matches[0]['bom-ref'] != template['bom-ref'])):
+            raise ValueError('Conflicting internal service identity: ' + row['name'])
+        if not matches:
+            application['services'].append({'bom-ref':template['bom-ref'], 'name':row['name'],
+                'network-exposure':'private','endpoints':copy.deepcopy(template['endpoints']),
+                'properties':copy.deepcopy(template.get('properties', []))})
+            restored.append(row['name'])
+        image_ref = images[0]['bom-ref']
+        edges = [d for d in application.setdefault('dependencies', []) if d['ref'] == image_ref]
+        if len(edges) > 1:
+            raise ValueError('Duplicate image dependency entry: ' + row['name'])
+        if not edges:
+            edges = [{'ref':image_ref,'dependsOn':[]}]
+            application['dependencies'].extend(edges)
+        edges[0]['dependsOn'] = sorted(set(edges[0]['dependsOn'] + [template['bom-ref']]))
+    return restored
+
+
 def verify_document(document, inventory, deployment=False):
     field = 'network_exposure' if deployment else 'network-exposure'
     for row in inventory['services']:

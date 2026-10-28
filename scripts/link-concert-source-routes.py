@@ -14,7 +14,7 @@ import subprocess
 import urllib.request
 
 from concert_image_identity import identity
-from concert_internal_endpoints import collect, compact_properties, enrich, verify_document
+from concert_internal_endpoints import collect, compact_properties, enrich, restore_application_services, verify_document
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = ROOT / '.runtime/source-route-links'
@@ -75,6 +75,7 @@ def main():
     external_builds={b['name']:b for b in json.loads(pathlib.Path(args.build_evidence_file).read_text())} if args.build_evidence_file else {}
     routes,deployments=oc('routes'),oc('deployments')
     internal = collect(oc('services'), OUT)
+    internal['restored_application_services'] = restore_application_services(app, deploy, internal)
     enrich(app, internal)
     enrich(deploy, internal, deployment=True)
     images={d['metadata']['name']:identity(d['spec']['template']['spec']['containers'][0]['image']) for d in deployments}
