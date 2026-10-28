@@ -10,7 +10,7 @@ def build(config):
     from patch_catalog import load_policies
     policies=load_policies()
     for role in ['staging','production']:
-        assert config[role+'_environment_id'] and config[role+'_deployment_id']
+        assert config[role+'_environment_id'] and config[role+'_deployment_prefix']
     flow=base.build({**config,'workflow_name':'Langflow Dependency Remediation'},policies=policies)
     def fn(name,code):return {'name':name,'function':code}
     def request(name,path):
