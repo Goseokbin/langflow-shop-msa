@@ -10,13 +10,14 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 POLICY = json.loads((ROOT / 'scripts/patch-policy.json').read_text())
 
 
-def build(config):
+def build(config, policy=None):
+    policy = policy or POLICY
     required = ['repository', 'concert_host', 'application_api', 'source_repo_id', 'github_auth', 'concert_auth']
     if any(not config.get(k) for k in required):
         raise ValueError('Missing required non-secret configuration')
     if not config['application_api'].startswith('/concert/core/api/v2/applications/'):
         raise ValueError('Expected a scoped application version API path')
-    cfg = {**config, 'policy': POLICY}
+    cfg = {**config, 'policy': policy}
     def variable(name, value='null', **kw):
         return {'name': name, 'isInput': False, 'isOutput': False, 'required': False,
                 'level': 'INTERMEDIATE', 'type': {'type': 'any'}, 'value': value, **kw}
@@ -38,8 +39,8 @@ def build(config):
     blocks = [function('01_ValidatePolicy', r'''
 if (!["plan", "create-pr", "verify", "auto"].includes($operation)) throw new Error("Unsupported operation");
 if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test($config.repository)) throw new Error("Invalid repository");
-if ($config.policy.package !== "requests" || $config.policy.to_version !== "2.33.0") throw new Error("Policy is not approved");
-'''), http('02_ReadConcertFindings', '"https://" + $config.concert_host', concert_path + ' + "/cve_findings"', '$config.concert_auth', query='{"page_size":2000}'),
+if (JSON.stringify($config.policy) !== JSON.stringify(APPROVED_POLICY)) throw new Error("Policy is not approved");
+'''.replace('APPROVED_POLICY',json.dumps(policy))), http('02_ReadConcertFindings', '"https://" + $config.concert_host', concert_path + ' + "/cve_findings"', '$config.concert_auth', query='{"page_size":2000}'),
     http('03_ReadConcertInventory', '"https://" + $config.concert_host', concert_path + ' + "/packages"', '$config.concert_auth', query='{"page_size":2000}'),
     gh('04_ReadSource', prefix + ' + "/contents/" + $config.policy.file', query='{"ref":"main"}'),
     function('05_AssessPatch', '''
@@ -62,7 +63,7 @@ if (!$alreadyFixed) {
  const found=[...new Set($evidence.map(f=>f.cve))];
  if (!p.cves.every(c=>found.includes(c))) throw new Error("Expected Concert CVE evidence is missing");
  if ($before.split(/\\r?\\n/).filter(l=>l===p.package+"=="+p.from_version).length!==1) throw new Error("Base dependency changed; review required");
- const allowedFixed=["2.32.0","2.32.4","2.33.0"];
+ const allowedFixed=p.fixed_versions || ["2.32.0","2.32.4","2.33.0"];
  if ($evidence.some(f=>!allowedFixed.some(v=>f.fixed_version==="Upgrade requests to version "+v))) throw new Error("Fix recommendation changed; review required");
  $after=$before.replace(p.package+"=="+p.from_version,p.package+"=="+p.to_version);
 }
@@ -88,10 +89,10 @@ if(content!==$before && content!==$after) throw new Error("Existing branch conta
 $needsCommit=content===$before;
 '''),
             {'action':'if','name':'CommitIfNeeded','condition':'$needsCommit','then':[
-                gh('CommitVersionPatch', prefix+' + "/contents/"+$config.policy.file', method='PUT', body='{"message":"fix: upgrade requests to 2.33.0 for three CVEs","branch":$config.policy.branch,"sha":$branchSource.sha,"content":Buffer.from($after,"utf8").toString("base64")}'),
+                gh('CommitVersionPatch', prefix+' + "/contents/"+$config.policy.file', method='PUT', body='{"message":"fix: upgrade "+$config.policy.package+" to "+$config.policy.to_version+" for "+$config.policy.cves.join(", "),"branch":$config.policy.branch,"sha":$branchSource.sha,"content":Buffer.from($after,"utf8").toString("base64")}'),
                 function('RequireCommit', 'if ($CommitVersionPatch.statusCode!==200 && $CommitVersionPatch.statusCode!==201) throw new Error("Patch commit failed");')
             ],'else':[]},
-            gh('CreateRemediationPR', prefix+' + "/pulls"', method='POST', body='{"title":"fix: remediate requests CVEs with 2.33.0","head":$config.policy.branch,"base":"main","body":"Concert Workflows detected requests 2.31.0 in the source inventory. This PR changes only services/langflow-ai-service/requirements.txt to requests 2.33.0.\\n\\nTarget findings: CVE-2024-35195, CVE-2024-47081, CVE-2026-25645.\\n\\nPatch PR verification checks the exact diff, Python dependency resolution, HTTP behavior, service health, source/image vulnerability inventory and CodeQL. Existing unrelated findings remain for triage.\\n\\nReview and merge this PR to run the main build, Concert ingestion, deployment and smoke pipeline. A successful PR or merge alone is not remediation closure; run the Workflows verify operation after that pipeline succeeds."}'),
+            gh('CreateRemediationPR', prefix+' + "/pulls"', method='POST', body='{"title":"fix: remediate "+$config.policy.package+" CVE with "+$config.policy.to_version,"head":$config.policy.branch,"base":"main","body":"Concert Workflows verified current package and CVE evidence before proposing this allowlisted patch.\\n\\nPackage: "+$config.policy.package+" "+$config.policy.from_version+" -> "+$config.policy.to_version+". File: "+$config.policy.file+". Target: "+$config.policy.cves.join(", ")+".\\n\\nThis PR changes exactly one approved dependency line. PR checks verify scope, dependency resolution, parser/client behavior, service health, source and image CVE absence and CodeQL. After merge, the main pipeline scans and tests staging; production requires human approval and promotes the exact tested image digests. Findings on older images or unrelated components are not automatically closed."}'),
             function('ReturnCreatedPR', '''
 if ($CreateRemediationPR.statusCode!==201) throw new Error("PR creation failed");
 const pr=typeof $CreateRemediationPR.result==="string"?JSON.parse($CreateRemediationPR.result):$CreateRemediationPR.result;
@@ -116,7 +117,7 @@ $result={...$result,status:ready?(open.length?"deployment_verified_concert_findi
  source_version_verified:$alreadyFixed,source_matches_deployed_release:sourceMatchesRelease,concert_package_versions:[...new Set(packages.map(p=>p.version))],
  remaining_concert_target_rows:open.length,closure:ready && open.length===0?"verified":"not_closed"};
 ''')], 'else': []}]
-    return {'name':'Langflow Package Patch Demo','platform':'node',
+    return {'name':config.get('workflow_name','Langflow Package Patch Demo'),'platform':'node',
         'meta':{'version':5,'layout':'flow','workerGroup':'default','description':'Plan → constrained package patch PR → PR checks → review/merge → existing deployment pipeline → evidence verification. No automatic merge.'},
         'variables':[variable('operation','"plan"',isInput=True,type={'type':'string','enum':['plan','create-pr','verify','auto']}),
             variable('config',json.dumps(cfg)),variable('result','{}',isOutput=True)]+

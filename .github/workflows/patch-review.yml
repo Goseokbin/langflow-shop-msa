@@ -7,6 +7,12 @@ permissions:
 concurrency:
   group: patch-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
+env:
+  PATCH_POLICY: ${{ startsWith(github.head_ref, 'concert-patch/python-multipart-') && 'multipart' || 'requests' }}
+  PATCH_SERVICE: ${{ startsWith(github.head_ref, 'concert-patch/python-multipart-') && 'user-service' || 'langflow-ai-service' }}
+  PATCH_PACKAGE: ${{ startsWith(github.head_ref, 'concert-patch/python-multipart-') && 'python-multipart' || 'requests' }}
+  PATCH_VERSION: ${{ startsWith(github.head_ref, 'concert-patch/python-multipart-') && '0.0.32' || '2.33.0' }}
+  PATCH_PORT: ${{ startsWith(github.head_ref, 'concert-patch/python-multipart-') && '8001' || '8005' }}
 jobs:
   scope:
     name: 01 · 패치 변경 범위
@@ -28,6 +34,14 @@ jobs:
     needs: scope
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: patch-test
+          POSTGRES_DB: user_db
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -44,17 +58,21 @@ jobs:
           trivy fs --scanners vuln --list-all-pkgs --format json --output .runtime/patch-review/source.json services
           python3 scripts/verify-patch.py scan .runtime/patch-review/source.json > .runtime/patch-review/source-gate.json
       - name: Resolve dependencies and build patched service
-        run: docker build -t patch-review:local services/langflow-ai-service
+        run: docker build -t patch-review:local "services/$PATCH_SERVICE"
       - name: Dependency and HTTP client regression checks
         run: |
           docker run --rm patch-review:local python -m pip check
-          docker run --rm patch-review:local python -c 'import requests; assert requests.__version__ == "2.33.0"'
-          docker run --rm -i patch-review:local python < scripts/requests-regression.py
+          docker run --rm -e PATCH_PACKAGE -e PATCH_VERSION patch-review:local python -c 'import os,importlib.metadata; assert importlib.metadata.version(os.environ["PATCH_PACKAGE"])==os.environ["PATCH_VERSION"]'
+          if [ "$PATCH_POLICY" = multipart ]; then
+            docker run --rm -i patch-review:local python < scripts/multipart-regression.py
+          else
+            docker run --rm -i patch-review:local python < scripts/requests-regression.py
+          fi
       - name: Start service and check health
         run: |
-          docker run -d --name patch-app -p 8005:8005 patch-review:local
+          docker run -d --name patch-app --network host -e POSTGRES_HOST=127.0.0.1 -e POSTGRES_PASSWORD=patch-test -e POSTGRES_DB=user_db patch-review:local
           for attempt in $(seq 1 30); do
-            if curl -fsS http://localhost:8005/health > .runtime/patch-review/health.json; then exit 0; fi
+            if curl -fsS "http://localhost:$PATCH_PORT/health" > .runtime/patch-review/health.json; then exit 0; fi
             sleep 2
           done
           docker logs patch-app

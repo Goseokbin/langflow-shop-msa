@@ -9,19 +9,20 @@ spec.loader.exec_module(patch)
 
 class PatchGuards(unittest.TestCase):
     def test_exact_diff(self):
-        patch.validate_change('requests==2.31.0\n', 'requests==2.33.0\n', [patch.POLICY['file']])
-        for changed, after in [(['Dockerfile'], 'requests==2.33.0\n'),
-                               ([patch.POLICY['file']], 'requests==2.33.0\nextra==1\n')]:
+        old=patch.POLICY['package']+'=='+patch.POLICY['from_version']+'\n'
+        new=patch.POLICY['package']+'=='+patch.POLICY['to_version']+'\n'
+        patch.validate_change(old,new,[patch.POLICY['file']])
+        for changed, after in [(['Dockerfile'],new),([patch.POLICY['file']],new+'extra==1\n')]:
             with self.assertRaises(ValueError):
-                patch.validate_change('requests==2.31.0\n', after, changed)
+                patch.validate_change(old,after,changed)
 
     def test_missing_inventory_is_not_success(self):
         with self.assertRaises(ValueError):
             patch.validate_scan({'Results': []})
 
     def test_scan_requires_version_and_cve_absence(self):
-        doc = {'Results': [{'Packages': [{'Name': 'requests', 'Version': '2.33.0'}]}]}
-        self.assertEqual(patch.validate_scan(doc)['version'], '2.33.0')
-        doc['Results'][0]['Vulnerabilities'] = [{'PkgName': 'requests', 'VulnerabilityID': patch.POLICY['cves'][0]}]
+        doc = {'Results': [{'Packages': [{'Name':patch.POLICY['package'],'Version':patch.POLICY['to_version']}]}]}
+        self.assertEqual(patch.validate_scan(doc)['version'],patch.POLICY['to_version'])
+        doc['Results'][0]['Vulnerabilities'] = [{'PkgName':patch.POLICY['package'], 'VulnerabilityID': patch.POLICY['cves'][0]}]
         with self.assertRaises(ValueError):
             patch.validate_scan(doc)

@@ -1,0 +1,11 @@
+{
+  "package": "python-multipart",
+  "from_version": "0.0.6",
+  "to_version": "0.0.32",
+  "file": "services/user-service/requirements.txt",
+  "service": "user-service",
+  "branch": "concert-patch/python-multipart-0.0.32",
+  "cves": ["CVE-2024-53981"],
+  "fixed_versions": ["0.0.18"],
+  "advisory": "https://github.com/Kludex/python-multipart/security/advisories/GHSA-59g5-xgcq-4qw3"
+}

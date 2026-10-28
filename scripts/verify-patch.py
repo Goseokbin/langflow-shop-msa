@@ -3,10 +3,16 @@
 import argparse
 import json
 import pathlib
+import os
 import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-POLICY = json.loads((ROOT / 'scripts/patch-policy.json').read_text())
+def load_policy(name='requests'):
+    paths={'requests':'scripts/patch-policy.json','multipart':'scripts/patch-policies/multipart.json'}
+    if name not in paths:raise ValueError('Unknown patch policy')
+    return json.loads((ROOT/paths[name]).read_text())
+
+POLICY = load_policy(os.environ.get('PATCH_POLICY','requests'))
 
 
 def validate_change(before, after, changed):
@@ -18,8 +24,8 @@ def validate_change(before, after, changed):
         raise ValueError('Patch must contain exactly the approved one-line version change')
 
 
-def validate_scan(doc):
-    p = POLICY
+def validate_scan(doc, policy=None):
+    p = policy or POLICY
     packages = [x for r in doc.get('Results', []) for x in r.get('Packages', []) if x['Name'] == p['package']]
     if not packages or any(x['Version'] != p['to_version'] for x in packages):
         raise ValueError('Target package/version missing or unexpected in actual scan inventory')
