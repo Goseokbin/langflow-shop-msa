@@ -158,7 +158,9 @@ def main(args):
     for name in sorted(ALL-{'postgresql','langflow'}):wait(name)
     rows=verify_images(release)
     result=subprocess.check_output([sys.executable,str(ROOT/'scripts/smoke-test.py')],env={**os.environ,'SHOP_NAMESPACE':NS})
-    smoke=json.loads(result);assert len(smoke['results'])==8
+    smoke=json.loads(result)
+    if len(smoke['results']) != 9:
+        raise ValueError('Expected 9 commerce checks, including catalog image availability')
     inventory=collect(get('services')['items'],OUT/'openapi',namespace=NS)
     os.environ.update(CONCERT_HOST=config['CONCERT_HOST'],CONCERT_APP_API=config['CONCERT_APP_API'])
     spec=importlib.util.spec_from_file_location('audit',ROOT/'scripts/concert-audit-api.py');api=importlib.util.module_from_spec(spec);spec.loader.exec_module(api)
@@ -199,7 +201,7 @@ def main(args):
             'concert_environment_id':config['CONCERT_ENVIRONMENT_ID'],'concert_deployment_id':dep_id,
             'frontend':'https://'+get('route','frontend')['spec']['host'],'model_inference':'not tested; requires a production model credential and available credits'}
         (OUT/'verification.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
-        summary='## 11 · 승인 후 동일 이미지 운영 배포\n\n검증과 동일한 이미지 9개, 기능 검사 8개, 내부 API 경로 '+str(inventory['api_paths'])+'개 확인.\n\n[운영 쇼핑몰]('+report['frontend']+')\n\n| 서비스 | 검증·운영 동일 digest |\n| --- | --- |\n'+'\n'.join('| '+r['name']+' | `'+r['digest']+'` |' for r in rows)+'\n'
+        summary='## 11 · 승인 후 동일 이미지 운영 배포\n\n검증과 동일한 이미지 9개, 기능 검사 '+str(report['commerce_checks'])+'개, 내부 API 경로 '+str(inventory['api_paths'])+'개 확인.\n\n[운영 쇼핑몰]('+report['frontend']+')\n\n| 서비스 | 검증·운영 동일 digest |\n| --- | --- |\n'+'\n'.join('| '+r['name']+' | `'+r['digest']+'` |' for r in rows)+'\n'
         if os.environ.get('GITHUB_STEP_SUMMARY'):Path(os.environ['GITHUB_STEP_SUMMARY']).write_text(summary)
         print(json.dumps(report,ensure_ascii=False))
     finally:auth.unlink(missing_ok=True)
