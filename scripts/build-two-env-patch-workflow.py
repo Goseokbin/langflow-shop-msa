@@ -3,15 +3,10 @@
 import argparse,importlib.util,json,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-spec=importlib.util.spec_from_file_location('patch_builder',Path(__file__).with_name('build-patch-workflow.py'))
-base=importlib.util.module_from_spec(spec);spec.loader.exec_module(base)
 
-def build(config):
-    from patch_catalog import load_policies
-    policies=load_policies()
+def build(config, evidence_only=False):
     for role in ['staging','production']:
         assert config[role+'_environment_id'] and config[role+'_deployment_prefix']
-    flow=base.build({**config,'workflow_name':'Langflow Dependency Remediation'},policies=policies)
     def fn(name,code):return {'name':name,'function':code}
     def request(name,path):
         query={'page_size':2000}
@@ -95,6 +90,13 @@ $result={...$result,verification_scope:$config.policy.service+" current image in
 staging:{image:$stagingRuntime.image,artifact_id:$stagingRuntime.artifact,package_versions:[...new Set(stagingPackageRows.map(p=>p.version))],target_finding_rows:stagingTargetRows.length},
 production:{image:$productionRuntime.image,artifact_id:$productionRuntime.artifact,package_versions:[...new Set(productionPackageRows.map(p=>p.version))],target_finding_rows:productionTargetRows.length}}};
 ''')]
+    if evidence_only:
+        return {'blocks': scope}
+    from patch_catalog import load_policies
+    policies=load_policies()
+    spec=importlib.util.spec_from_file_location('patch_builder',Path(__file__).with_name('build-patch-workflow.py'))
+    base=importlib.util.module_from_spec(spec);spec.loader.exec_module(base)
+    flow=base.build({**config,'workflow_name':'Langflow Dependency Remediation'},policies=policies)
     # Current image evidence supplies the CVE precondition; avoid a stale source-release snapshot.
     original={b['name']:b for b in flow['blocks']}
     assess=original['05_AssessPatch']
