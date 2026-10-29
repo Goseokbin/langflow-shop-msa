@@ -8,14 +8,16 @@ Frontend → API Gateway → User / Product / Cart / Order / Langflow AI Service
 
 ## 자동 파이프라인
 
-main push 또는 Actions의 Run workflow에서 다음 Tekton 단계가 실행됩니다.
+main의 파이프라인 관련 파일 push 또는 Actions의 Run workflow에서 GitHub Actions가 다음 단계를 직접 실행합니다. 각 단계는 Actions 그래프의 별도 job으로 표시됩니다.
 
 ```text
-prepare → source-scan → build → image-scan → concert-ingest → deploy → link-verify
+준비 → 소스 Trivy → CodeQL SAST → Concert SAST 수집 → 이미지 빌드·Push
+→ 이미지 9개 Trivy → Concert CVE 수집 → 검증 배포 → 연결 검증 → 기능 검사
+→ production 승인 대기 → 같은 이미지 운영 배포·검증
 ```
 
-- GitHub Actions는 소스를 checkout하고 namespace 전용 CI 계정으로 PipelineRun을 시작합니다.
-- 실행 시 소스 tar의 SHA-256과 Git commit을 기록합니다. 미커밋 작업은 별도 snapshot으로 표시합니다.
+- GitHub Actions가 소스를 checkout하고 namespace 전용 CI 계정으로 빌드 결과를 배포합니다.
+- 실행 시 소스 tar의 SHA-256과 Git commit을 기록하고, 이후 job에서도 같은 실행·커밋인지 검사합니다.
 - Trivy가 소스 의존성과 실제 이미지 digest를 스캔합니다.
 - 소스 SBOM·CVE는 repository 대상으로, 이미지 결과는 image 대상으로 Concert에 수집합니다.
 - 수집 완료 후 이미지를 배포하고 저장소·이미지·서비스·외부 Route 관계를 연결합니다.
@@ -24,15 +26,11 @@ prepare → source-scan → build → image-scan → concert-ingest → deploy �
 
 ## GitHub Actions 설정
 
-Repository Secrets에 `OPENSHIFT_SERVER`, `OPENSHIFT_TOKEN`, `OPENSHIFT_CA`가 필요합니다. 토큰은 테스트 namespace에서 PipelineRun을 시작하는 CI 계정용이며 클러스터 관리자 토큰을 사용하지 않습니다. GitHub hosted runner에서 클러스터 API에 접근할 수 있어야 합니다.
+Repository Secrets에 `OPENSHIFT_SERVER`, `OPENSHIFT_TOKEN`, `OPENSHIFT_CA`, `CONCERT_AUTH_HEADER`, `PIPELINE_STATE_KEY`, `PROMOTION_STATE_KEY`가 필요합니다. OpenShift 토큰은 검증 namespace의 기존 CI 계정용입니다. GitHub hosted runner에서 클러스터 API·Concert·이미지 레지스트리에 접근할 수 있어야 합니다.
 
-Concert 인증은 클러스터 Secret `concert-pipeline-auth`의 `authorization` 키로 보관합니다. GitHub runner에 Concert 키를 복사하지 않습니다. 인스턴스 주소와 application/deployment 식별자는 namespace ConfigMap `langflow-shop-pipeline-config`에 보관합니다.
+`production` Environment에는 `PROD_OPENSHIFT_SERVER`, `PROD_OPENSHIFT_TOKEN`, `PROD_OPENSHIFT_CA`, `PROD_CONCERT_AUTH_HEADER`를 준비하고 Required reviewers와 배포 브랜치 조건을 설정합니다. 운영 job은 사람이 승인한 뒤 검증된 릴리스를 받아 같은 이미지 digest를 배포합니다.
 
-파이프라인의 최초 설치는 권한 있는 작업자가 수행합니다. `scripts/run-devsecops-pipeline.py --authorization-file ...`가 Task·Pipeline·SA·RBAC·PVC를 생성합니다. 이후 CI는 설치 권한 없이 다음 명령으로 실행합니다.
-
-```sh
-python3 scripts/run-devsecops-pipeline.py --start-only --wait-for-idle --wait
-```
+인스턴스 주소와 application/deployment 식별자는 각 namespace의 ConfigMap `langflow-shop-pipeline-config`에 보관합니다. 인증 값은 Git·일반 설정 파일·공개 보고서에 넣지 않습니다. `scripts/run-devsecops-pipeline.py`는 이전 Tekton 실습용이며 현재 GitHub Actions 실행에는 사용하지 않습니다.
 
 ## 애플리케이션 최초 배포
 
@@ -53,3 +51,5 @@ python3 scripts/smoke-test.py
 ## CVE 조치 관리 데모
 
 [기본 담당자·SLA·배포 후 검증 가이드](docs/NATIVE_GOVERNANCE.md)는 Automation rules로 티켓·담당자를, Goals로 SLA를 설정하고 Workflows는 두 환경의 패치 결과 조회에 사용하는 방법을 설명합니다. [이전 사용자 정의 데모](docs/CVE_CASE_MANAGEMENT.md)는 변경 이력으로 보존합니다.
+
+[조직 저장소 이전 가이드](docs/REPOSITORY_TRANSFER.md)는 공개 상태·이력을 유지하며 저장소를 이전하고 Actions·운영 승인·Concert의 새 주소 연결을 확인하는 방법을 설명합니다.

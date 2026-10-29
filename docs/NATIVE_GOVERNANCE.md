@@ -1,5 +1,7 @@
 # 기본 Automation rules·Goals와 배포 후 검증
 
+> 앱 저장소를 `goseokbin-concert/langflow-shop-msa`로 이전했습니다. 현재 주소·규칙·검증 연결의 전환 절차는 [조직 저장소 이전](REPOSITORY_TRANSFER.md)을 확인하세요. 아래 c2b2099 릴리스와 별도 이슈 저장소의 결과는 이전 실습 기록입니다.
+
 담당자와 SLA는 Concert 화면에서 설정합니다. Workflows의 JSON에는 담당자 표나 기한 계산식을 넣지 않습니다.
 
 | 역할 | 설정 위치 | 확인할 결과 |
