@@ -94,7 +94,19 @@ PR 검사는 별도 workflow입니다. PR을 병합하면 main의 배포 workflo
 
 “GitHub Actions가 검사·빌드·배포를 실행하고, Concert Protect가 앱과 운영 위험·담당·기한을 관리하며, Concert Workflows가 두 환경의 조치 완료 증거를 모아 확인합니다.”
 
-Goals는 GitHub 이슈에 Due date를 자동 입력하는 기능이 아닙니다. 현재 기본 GitHub 티켓 수집에는 기존 409 제약이 있어 개별 CVE 행의 티켓 배지와 양방향 자동 종료는 촬영의 성공 조건에 넣지 않습니다. 티켓 실제 생성·담당자 배정은 GitHub #6에서 확인합니다.
+Goals는 GitHub 이슈에 Due date를 자동 입력하는 기능이 아닙니다. **추가 점검 결과, Concert의 CVE 평가 API에는 이미 cart-service와 GitHub #6 연결이 저장돼 있습니다.** 그런데 앱·빌드 아티팩트의 CVE 목록 API는 같은 항목의 `issues`를 빈 배열로 반환해 화면에 `+ Open ticket`이 나타납니다. 기본 GitHub 수집의 별도 409 오류도 재현됐지만, 이것만으로 빈 티켓 칸을 설명할 수는 없습니다. 현재 앱 목록의 티켓 표시 복구와 양방향 상태 동기화는 완료되지 않았습니다. 중복 이슈를 만들지 말고, 촬영에서는 실제 생성·담당자 배정을 [기존 #6](https://github.com/goseokbin-concert/langflow-shop-msa/issues/6)에서 확인합니다. [재현 결과와 보완 범위](CONCERT_TICKET_DISPLAY_DIAGNOSTIC.md)를 참고합니다.
+
+## 조치 우선순위 10개 화면
+
+[langflow-shop 1.0.0 우선 조치 화면](https://concert-ibm-concert.apps.itz-2cu0mx.infra01-lb.syd05.techzone.ibm.com/concert/#/concert-protect/application-inventory/applications/1199cceb-e68f-4f6f-a96c-b9bffa0b7431/versions/a6b8821f-b02b-4417-b91e-d3831aea377a/cves?sort_by=risk_score&sort_direction=desc&page_size=10&page_number=1&filter=has_fix%3Atrue&filter=priority%3APriority%201)
+
+위 링크는 **Priority 1 + 수정 가능 + 위험 점수 내림차순 + 페이지당 10개**로 열립니다. 실제 Concert 화면에서 10개 행을 확인하고 새로고침 후에도 같은 조건으로 열리는 것을 확인했습니다. 일반 CVE 탭의 모든 사용자 기본값을 바꾼 것은 아니므로, 데모에서는 이 링크를 시작 화면으로 사용합니다.
+
+전체 수집 결과를 삭제하거나 취약점 상태를 임의로 낮추지 않았습니다. 이 화면은 **10개 발견 행**이며, 같은 CVE가 서로 다른 패키지·이미지·과거 저장소 기록에 있으면 여러 행으로 나올 수 있습니다. 이전 저장소 URL의 스캔 기록도 아직 조회되므로 현재 저장소 하나의 최신 결과라고 설명하지 않습니다.
+
+촬영 대상 `CVE-2024-53981`의 위험 점수는 7.5로 실제 위험 순 상위 10개 밖입니다. 데모에서는 “가장 위험한 1위 취약점” 대신 “패치·재검증 흐름을 보여 줄 cart-service 취약점”으로 설명하고 별도로 검색합니다.
+
+![우선순위 1·수정 가능·위험 점수순 10개](recording-demo/09-priority-top10.png)
 
 ## 버전과 촬영 후 관리
 
