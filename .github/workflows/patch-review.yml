@@ -81,7 +81,7 @@ jobs:
           docker run --rm -i patch-review:local python < "$PATCH_REGRESSION"
       - name: Start service and check health
         run: |
-          docker run -d --name patch-app --network host -e POSTGRES_HOST=127.0.0.1 -e POSTGRES_PASSWORD=patch-test -e POSTGRES_DB=user_db patch-review:local
+          docker run -d --name patch-app --network host -e POSTGRES_HOST=127.0.0.1 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=patch-test -e POSTGRES_DB=user_db patch-review:local
           for attempt in $(seq 1 30); do
             if curl -fsS "http://localhost:$PATCH_PORT/health" > .runtime/patch-review/health.json; then exit 0; fi
             sleep 2
