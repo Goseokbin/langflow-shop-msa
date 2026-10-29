@@ -40,7 +40,12 @@ def verify_remediation(release_file,output):
     images=[x for x in rows if x['name']==policy['service']]
     if len(images)!=1:raise ValueError('Expected one actual target image scan')
     source=json.loads((out/'source-scan.json').read_text())
-    def scan(row):return json.loads((out/Path(row['file']).name).read_text())
+    def scan(row):
+        # The report's file is the CycloneDX upload, while the gate requires
+        # Trivy's original Results/Packages/Vulnerabilities inventory.
+        name=row['name']
+        if name not in {'repository',policy['service']}:raise ValueError('Unexpected remediation scan scope')
+        return json.loads((out/(name+'.trivy.json')).read_text())
     source_gate=guard.validate_scan(scan(source),policy,source=True)
     image_gate=guard.validate_scan(scan(images[0]),policy)
     return {'version':release['version'],'policy':release['remediation_policy'],'service':policy['service'],'passed':True,'source':source_gate,'image':image_gate}

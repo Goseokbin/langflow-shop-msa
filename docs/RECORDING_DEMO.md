@@ -44,6 +44,30 @@ SSO와 GitHub에 먼저 로그인합니다. 원본 스캔 파일·인증 설정�
 
 촬영 전용 브랜치는 **concert-patch/cart-python-multipart-0.0.32**를 사용합니다. 기존 리허설 PR은 병합하지 않은 상태에서 정리합니다. PR 제목은 `fix(cart): patch python-multipart and release 1.0.1`, 본문은 `Refs #6`을 포함합니다. `Closes #6`는 여러 CVE가 묶인 이슈 전체를 너무 일찍 닫으므로 쓰지 않습니다.
 
+### 터미널에서 두 파일을 한 번에 수정하는 방법
+
+`gh auth status`에서 Goseokbin 계정을 확인하고, 저장소의 `main`이 깨끗한 상태에서 실행합니다. push 후 GitHub에서 **Compare & pull request**를 눌러 PR을 만듭니다. PR 생성 화면부터 촬영해도 됩니다.
+
+```bash
+git switch main
+git pull --ff-only
+git switch -c concert-patch/cart-python-multipart-0.0.32
+python3 - <<'PYTHON'
+from pathlib import Path
+import json
+p = Path('services/cart-service/requirements.txt')
+s = p.read_text()
+assert s.count('python-multipart==0.0.6') == 1, '현재 버전을 확인하세요'
+p.write_text(s.replace('python-multipart==0.0.6', 'python-multipart==0.0.32'))
+Path('release.json').write_text(json.dumps({
+    'version': '1.0.1', 'remediation_policy': 'multipart-cart'
+}, indent=2) + '\n')
+PYTHON
+git add services/cart-service/requirements.txt release.json
+git commit -m "fix(cart): patch python-multipart and release 1.0.1"
+git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push -u origin concert-patch/cart-python-multipart-0.0.32
+```
+
 ### 장면 6·9: Workflows 입력
 
 | 입력 | 값 |
@@ -64,7 +88,7 @@ PR 검사는 별도 workflow입니다. PR을 병합하면 main의 배포 workflo
 4. 08 Dev OpenShift / 09 Concert 연결 / 10 기능·패치 게이트: 실제 배포와 현재 이미지의 관계, 쇼핑몰 기능, 선택한 CVE 제거를 확인합니다.
 5. 11 운영 승인·승격: 사람이 승인한 뒤 동일 digest를 운영으로 복사하고 재검증합니다.
 
-1.0.1에서 대상 패키지 인벤토리가 없거나 버전이 다르거나 대상 CVE가 남으면 승격 번들을 만들지 않습니다. 전체 CVE 0건을 요구하는 정책은 아니며 다른 CVE는 남아 있습니다.
+1.0.1에서 대상 패키지 인벤토리가 없거나 버전이 다르거나 대상 CVE가 남으면 승격 번들을 만들지 않습니다. 전체 CVE 0건을 요구하는 정책은 아니며 다른 CVE는 남아 있습니다. 같은 CVE-2024-53981이 order-service 등 다른 컴포넌트에 남을 수 있으므로, 앱 전체 검색 건수가 아니라 **cart-service의 현재 이미지**를 비교합니다.
 
 ## 역할을 설명하는 한 문장
 
@@ -78,7 +102,7 @@ Goals는 GitHub 이슈에 Due date를 자동 입력하는 기능이 아닙니다
 - 같은 버전은 커밋 하나에 고정됩니다. 이미 생성된 1.0.1에 다른 커밋을 덮어쓰지 않습니다.
 - GitHub 브랜치 HEAD, 앱 릴리스 버전, 배포 이미지 digest는 서로 다른 식별자입니다. 촬영에서는 버전 이름을 간단히 보여 주되 증거에는 전체 커밋과 digest를 유지합니다.
 - 과거 Concert 버전은 메타데이터·SBOM·발견·배포 문서를 로컬 비공개 백업한 뒤 정리했습니다. 실제 Kubernetes 리소스를 과거 취약 버전으로 되돌린 것은 아닙니다.
-- 실제 AI 모델 응답은 이번 패치 데모 범위에서 제외합니다. VM 패치 데모는 대상 RHEL VM과 패치 도구 연결을 별도로 준비해야 하며, 이 문서의 앱 패치 성공을 VM 실행 성공으로 설명하지 않습니다.
+- 실제 AI 모델 응답은 이번 패치 데모 범위에서 제외합니다. 이번 촬영은 쇼핑몰 앱 패치만 다룹니다. VM 패치 데모는 별도 준비 범위입니다.
 
 ## 리허설 결과
 

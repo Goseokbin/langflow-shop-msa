@@ -9,13 +9,14 @@ class SemanticReleaseTests(unittest.TestCase):
     def test_real_source_and_image_inventory_required(self):
         with tempfile.TemporaryDirectory() as t:
             p=Path(t);(p/'release.json').write_text(json.dumps({'version':'1.0.1','remediation_policy':'multipart-cart'}))
-            (p/'source-scan.json').write_text(json.dumps({'file':'source.json'}))
-            (p/'image-scans.json').write_text(json.dumps([{'name':'cart-service','file':'image.json'}]))
+            (p/'source-scan.json').write_text(json.dumps({'name':'repository','file':'repository.cdx.json'}))
+            (p/'image-scans.json').write_text(json.dumps([{'name':'cart-service','file':'cart-service.cdx.json'}]))
             row={'Target':'cart-service/requirements.txt','Packages':[{'Name':'python-multipart','Version':'0.0.32'}]}
-            for n in ['source.json','image.json']:(p/n).write_text(json.dumps({'Results':[row]}))
+            for n in ['repository.cdx.json','cart-service.cdx.json']:(p/n).write_text(json.dumps({'bomFormat':'CycloneDX','components':[]}))
+            for n in ['repository.trivy.json','cart-service.trivy.json']:(p/n).write_text(json.dumps({'Results':[row]}))
             self.assertTrue(verify_remediation(p/'release.json',p)['passed'])
             row['Vulnerabilities']=[{'PkgName':'python-multipart','VulnerabilityID':'CVE-2024-53981'}]
-            (p/'image.json').write_text(json.dumps({'Results':[row]}))
+            (p/'cart-service.trivy.json').write_text(json.dumps({'Results':[row]}))
             with self.assertRaises(ValueError):verify_remediation(p/'release.json',p)
-            (p/'image.json').write_text(json.dumps({'Results':[]}))
+            (p/'cart-service.trivy.json').write_text(json.dumps({'Results':[]}))
             with self.assertRaises(ValueError):verify_remediation(p/'release.json',p)
