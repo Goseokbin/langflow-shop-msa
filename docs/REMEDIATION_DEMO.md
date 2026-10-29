@@ -97,9 +97,9 @@ Workflows → 작업 → 작업 작성에서 해당 워크플로우, 최신 버�
 
 ## 실제 실행 증거
 
-- Workflows가 만든 [PR #1](https://github.com/Goseokbin/langflow-shop-msa/pull/1): requirements 한 줄 변경, 재실행 시 기존 PR 재사용.
-- [PR 검사](https://github.com/Goseokbin/langflow-shop-msa/actions/runs/40484138957): 3단계 통과.
-- [병합 후 배포](https://github.com/Goseokbin/langflow-shop-msa/actions/runs/40484399389): 10단계 및 쇼핑몰 기능 8개 통과.
+- Workflows가 만든 [PR #1](https://github.com/goseokbin-concert/langflow-shop-msa/pull/1): requirements 한 줄 변경, 재실행 시 기존 PR 재사용.
+- [PR 검사](https://github.com/goseokbin-concert/langflow-shop-msa/actions/runs/40484138957): 3단계 통과.
+- [병합 후 배포](https://github.com/goseokbin-concert/langflow-shop-msa/actions/runs/40484399389): 10단계 및 쇼핑몰 기능 8개 통과.
 - 실행 중인 AI 서비스에서 requests 2.33.0과 해당 빌드 digest를 확인했다. Concert 저장소와 새 AI 서비스 이미지의 대상 CVE finding은 0건이며, Workflows는 `verified / closure=verified`를 반환했다.
 - 이전 2.31.0 패키지 기록은 Concert 목록에 남는다. 실제 배포 이미지와 최신 스캔을 함께 확인한다. 다른 CVE와 SAST 발견 사항은 이번 패치 범위에 포함하지 않았다.
 - 이미 수정된 main에서 `plan`을 실행하면 `source_already_patched`가 정상이다. 기존 PR과 실행 기록으로 시연하고, 새 실습에는 별도의 테스트 앱·환경을 사용한다.

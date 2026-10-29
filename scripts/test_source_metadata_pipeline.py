@@ -1,10 +1,24 @@
 import copy
 import json
 import unittest
-from concert_source_metadata import sync,strip,OWNED
+from concert_source_metadata import migrate_repository,sync,strip,OWNED
 
 
 class SourceMetadataTests(unittest.TestCase):
+    def test_transfer_retargets_new_blueprint_code_without_rewriting_old_image_evidence(self):
+        previous='https://github.com/Goseokbin/langflow-shop-msa'
+        current='https://github.com/goseokbin-concert/langflow-shop-msa'
+        template={'components':[{'name':'frontend','components':[
+            {'type':'code','purl':previous+'.git','branch':'main'},
+            {'type':'image','purl':'pkg:oci/frontend@sha256:abc','properties':[{'name':'source.repository','value':previous}]},
+            {'type':'code','purl':'https://github.com/other/library','branch':'main'}]}]}
+        blueprint=migrate_repository(copy.deepcopy(template),previous,current)
+        children=blueprint['components'][0]['components']
+        self.assertEqual(children[0]['purl'],current)
+        self.assertEqual(children[1],template['components'][0]['components'][1])
+        self.assertEqual(children[2],template['components'][0]['components'][2])
+        self.assertEqual(template['components'][0]['components'][0]['purl'],previous+'.git')
+
     def test_repeated_collection_replaces_only_owned_properties_once(self):
         class API:
             def __init__(self):

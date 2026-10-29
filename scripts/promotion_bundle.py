@@ -27,7 +27,7 @@ def image_references(image, registry):
 def validate_release(release):
     if release.get('schema_version') != 1 or not re.fullmatch(r'[0-9a-f]{40}', release.get('commit','')):
         raise ValueError('Invalid release identity')
-    if not str(release.get('run_id','')).isdigit() or release.get('repository') != 'Goseokbin/langflow-shop-msa':
+    if not str(release.get('run_id','')).isdigit() or release.get('repository') != 'goseokbin-concert/langflow-shop-msa':
         raise ValueError('Release must originate from the configured GitHub repository/run')
     rows = release.get('images',[])
     if len(rows)!=9 or {r['name'] for r in rows} != ALL:

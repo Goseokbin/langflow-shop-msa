@@ -13,13 +13,20 @@ from promotion_bundle import ALL, image_references, seal, unseal, validate_relea
 
 def release():
     digest='sha256:'+'a'*64
-    return {'schema_version':1,'commit':'b'*40,'run_id':'123','repository':'Goseokbin/langflow-shop-msa',
+    return {'schema_version':1,'commit':'b'*40,'run_id':'123','repository':'goseokbin-concert/langflow-shop-msa',
       'registry_host':'registry.example.com','images':[{'name':n,'source_image':'quay.io/demo/'+n+'@'+digest,'pull_image':'quay.io/demo/'+n+'@'+digest,'digest':digest} for n in sorted(ALL)],
       'deployments':{n:{'spec':{'template':{'spec':{'containers':[{'name':n,'env':[{'name':'JWT_SECRET_KEY','valueFrom':{'secretKeyRef':{'name':'jwt-secret','key':'JWT_SECRET_KEY'}}}]}]}}}} for n in ALL},
       'verification':{'commerce_passed':8,'internal_endpoints_verified':True}}
 
 
 class PromotionPipelineTests(unittest.TestCase):
+    def test_promotion_only_accepts_the_migrated_application_repository(self):
+        validate_release(release())
+        for repository in ['Goseokbin/langflow-shop-msa','goseokbin-concert/concert-remediation','another-owner/langflow-shop-msa']:
+            candidate=release();candidate['repository']=repository
+            with self.subTest(repository=repository),self.assertRaisesRegex(ValueError,'configured GitHub repository'):
+                validate_release(candidate)
+
     def test_production_model_keeps_canonical_image_and_separates_environment(self):
         spec=importlib.util.spec_from_file_location('promote',Path(__file__).parent/'promote-release.py')
         promote=importlib.util.module_from_spec(spec);spec.loader.exec_module(promote)

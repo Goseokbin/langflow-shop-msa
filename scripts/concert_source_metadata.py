@@ -9,6 +9,18 @@ OWNED={'source.latest_scanned_commit','source.scope'}
 def normalized(url):return url.rstrip('/').removesuffix('.git')
 
 
+def migrate_repository(document,previous,current):
+    """Retarget declared code in a new release blueprint, preserving image provenance."""
+    if not previous or normalized(previous)==normalized(current):return document
+    if isinstance(document,dict):
+        if document.get('type')=='code' and normalized(document.get('purl',''))==normalized(previous):
+            document['purl']=normalized(current)
+        for value in document.values():migrate_repository(value,previous,current)
+    elif isinstance(document,list):
+        for value in document:migrate_repository(value,previous,current)
+    return document
+
+
 def sync(client,url,branch,commit):
     if not re.fullmatch('[a-f0-9]{40}',commit):raise ValueError('Expected a verified source commit')
     query=urllib.parse.urlencode({'search':normalized(url),'page_size':100})

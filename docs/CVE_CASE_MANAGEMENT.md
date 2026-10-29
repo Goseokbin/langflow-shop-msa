@@ -46,7 +46,7 @@ Concert에서 **Langflow CVE Case Management → Run**을 엽니다.
 
 워크플로우는 두 환경에 배포된 이미지 digest를 읽고 해당 이미지의 패키지와 CVE를 확인합니다. High/Critical 발견 결과가 있을 때 서비스 소유자에게 이슈를 배정합니다. 같은 앱·서비스·CVE로 다시 실행하면 기존 건을 갱신합니다.
 
-이번 실습의 실제 건은 [이슈 #4](https://github.com/Goseokbin/langflow-shop-msa/issues/4)입니다. 담당자는 `Goseokbin`, 기한은 최초 발견일부터 7일인 **2026-11-04 17:21 KST**입니다. 재스캔이나 앱 버전 변경으로 기한을 초기화하지 않습니다.
+이번 실습의 실제 건은 [이슈 #4](https://github.com/goseokbin-concert/langflow-shop-msa/issues/4)입니다. 담당자는 `Goseokbin`, 기한은 최초 발견일부터 7일인 **2026-11-04 17:21 KST**입니다. 재스캔이나 앱 버전 변경으로 기한을 초기화하지 않습니다.
 
 Concert의 **CVE findings → Filters → CVE**로 대상 CVE를 필터링합니다. `cart-service` 행을 펼치면 티켓 `#4`와 평가 상세의 담당자·기한이 나옵니다. 상단 Find와 CVE 필터는 구분합니다.
 

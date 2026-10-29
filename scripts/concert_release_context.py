@@ -85,8 +85,12 @@ def configure(client,template,manifest,destination,prefix='1.0.1'):
     matches=[v for v in response['versions'] if v['version']==version]
     if not matches:
         from concert_internal_endpoints import compact_properties
-        from concert_source_metadata import strip
-        doc=strip(compact_properties(copy.deepcopy(client.request(template+'/sbom'))),manifest['repository'])
+        from concert_source_metadata import migrate_repository,strip
+        doc=copy.deepcopy(client.request(template+'/sbom'))
+        # The old URL remains in historical releases and image provenance. Only
+        # declared code in this new release uses the configured transfer target.
+        migrate_repository(doc,os.environ.get('CONCERT_PREVIOUS_REPO_URL',''),manifest['repository'])
+        doc=strip(compact_properties(doc),manifest['repository'])
         doc['metadata'].update({'application-version':version,'timestamp':datetime.datetime.now(datetime.timezone.utc).isoformat()})
         destination.parent.mkdir(parents=True,exist_ok=True)
         blueprint=destination.with_name('release-blueprint.json');blueprint.write_text(json.dumps(doc))
