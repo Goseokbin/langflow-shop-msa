@@ -1,0 +1,94 @@
+{
+  "checked_at": "2026-10-29T08:05:02.907327+00:00",
+  "concert_versions": [
+    "1.0.0"
+  ],
+  "service": "cart-service",
+  "cve": "CVE-2024-53981",
+  "environments": {
+    "dev": {
+      "ready_deployments": 9,
+      "images": {
+        "api-gateway": "sha256:7e900c8fcdf6106d9ed8e869700934a0fb207ce501f68e133b31789e163454df",
+        "cart-service": "sha256:18db88a4c917301dd8e6fa8fe1f80837bf9a2a678610a7608c7520c54ed35811",
+        "frontend": "sha256:ee836efea75094a14f45e2eef41a684b8163bec8b828d5d48fad1ec440212422",
+        "langflow": "sha256:36a1cf1e329a94dba77980fd0b0db3237d49d5a30df39cdad703a6a9bf67782b",
+        "langflow-ai-service": "sha256:6157b27d71bb219a8ea6a3f42e108ac5efd385f77772f70c0176f21028b7ff00",
+        "order-service": "sha256:6e3827b881e65f0b613a950600ff5b8786096be8cbc6a8b1e17e6fddbdbcb71e",
+        "postgresql": "sha256:c9990e93bf07321bf5f8cc31ef97951ec181d0f40293c0438422e8e53e2ef06e",
+        "product-service": "sha256:8415642848a5e3b80e041f9133dc17943908c0049d61b7be36307653778d19f2",
+        "user-service": "sha256:fd46d256c032db3dad01072b25c2ad23f9cc2453a3522600fb6942b650962c78"
+      },
+      "python_multipart": "0.0.6"
+    },
+    "production": {
+      "ready_deployments": 9,
+      "images": {
+        "api-gateway": "sha256:7e900c8fcdf6106d9ed8e869700934a0fb207ce501f68e133b31789e163454df",
+        "cart-service": "sha256:18db88a4c917301dd8e6fa8fe1f80837bf9a2a678610a7608c7520c54ed35811",
+        "frontend": "sha256:ee836efea75094a14f45e2eef41a684b8163bec8b828d5d48fad1ec440212422",
+        "langflow": "sha256:36a1cf1e329a94dba77980fd0b0db3237d49d5a30df39cdad703a6a9bf67782b",
+        "langflow-ai-service": "sha256:6157b27d71bb219a8ea6a3f42e108ac5efd385f77772f70c0176f21028b7ff00",
+        "order-service": "sha256:6e3827b881e65f0b613a950600ff5b8786096be8cbc6a8b1e17e6fddbdbcb71e",
+        "postgresql": "sha256:c9990e93bf07321bf5f8cc31ef97951ec181d0f40293c0438422e8e53e2ef06e",
+        "product-service": "sha256:8415642848a5e3b80e041f9133dc17943908c0049d61b7be36307653778d19f2",
+        "user-service": "sha256:fd46d256c032db3dad01072b25c2ad23f9cc2453a3522600fb6942b650962c78"
+      },
+      "python_multipart": "0.0.6"
+    }
+  },
+  "same_digests": true,
+  "patch_rehearsal": {
+    "application_source_commit": "0f7cca4f5062219f1b73ebba5e03a6d98885cc95",
+    "source_run": 40837083211,
+    "verification_run": "40839301118",
+    "tool_commit": "ba2c3607ab6f92f724756188d3fa1f66b65f127a",
+    "image_rebuilt": false,
+    "production_deployed": false,
+    "remediation": {
+      "version": "1.0.1",
+      "policy": "multipart-cart",
+      "service": "cart-service",
+      "passed": true,
+      "source": {
+        "package": "python-multipart",
+        "version": "0.0.32",
+        "inventory_occurrences": 1,
+        "target_cves_absent": [
+          "CVE-2024-53981"
+        ],
+        "scope": "services/cart-service/requirements.txt"
+      },
+      "image": {
+        "package": "python-multipart",
+        "version": "0.0.32",
+        "inventory_occurrences": 1,
+        "target_cves_absent": [
+          "CVE-2024-53981"
+        ],
+        "scope": "selected image; other findings remain for triage"
+      }
+    },
+    "commerce": {
+      "checks": [
+        "unauthenticated cart: 401",
+        "registration: 201",
+        "invalid login: 401",
+        "login and profile: PASS",
+        "catalog images: 5 reachable images",
+        "catalog: 5 products",
+        "cart add/read/update: PASS",
+        "checkout, order history, inventory and cart clear: PASS",
+        "cancel and restore inventory: PASS"
+      ],
+      "passed": 9
+    }
+  },
+  "runs": {
+    "baseline": "https://github.com/goseokbin-concert/langflow-shop-msa/actions/runs/40834109250",
+    "patch_pr": "https://github.com/goseokbin-concert/langflow-shop-msa/actions/runs/40836719449",
+    "patch_stages_01_09": "https://github.com/goseokbin-concert/langflow-shop-msa/actions/runs/40837083211",
+    "stage10_recheck": "https://github.com/goseokbin-concert/langflow-shop-msa/actions/runs/40839301118"
+  },
+  "restored_dev_functional_checks": 9
+}

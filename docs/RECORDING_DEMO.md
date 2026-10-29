@@ -101,9 +101,30 @@ Goals는 GitHub 이슈에 Due date를 자동 입력하는 기능이 아닙니다
 - 촬영 시작은 Concert에 **1.0.0 하나**, 패치 시 **1.0.1**이 추가됩니다. 커밋마다 해시가 붙은 앱 버전을 만들지 않습니다.
 - 같은 버전은 커밋 하나에 고정됩니다. 이미 생성된 1.0.1에 다른 커밋을 덮어쓰지 않습니다.
 - GitHub 브랜치 HEAD, 앱 릴리스 버전, 배포 이미지 digest는 서로 다른 식별자입니다. 촬영에서는 버전 이름을 간단히 보여 주되 증거에는 전체 커밋과 digest를 유지합니다.
-- 과거 Concert 버전은 메타데이터·SBOM·발견·배포 문서를 로컬 비공개 백업한 뒤 정리했습니다. 실제 Kubernetes 리소스를 과거 취약 버전으로 되돌린 것은 아닙니다.
+- 과거 Concert 버전은 메타데이터·SBOM·발견·배포 문서를 로컬 비공개 백업한 뒤 정리했습니다. 이력 정리는 실행 중인 앱을 바꾸지 않았습니다. 별도 1.0.1 리허설 후 Dev만 미리 보관한 1.0.0 기준 이미지로 복원했고 운영은 승인한 1.0.0을 유지했습니다.
 - 실제 AI 모델 응답은 이번 패치 데모 범위에서 제외합니다. 이번 촬영은 쇼핑몰 앱 패치만 다룹니다. VM 패치 데모는 별도 준비 범위입니다.
 
 ## 리허설 결과
 
-이 구간은 실제 실행 확인 후 갱신합니다. 원본 결과 링크와 촬영 시작 상태를 구분해서 기록합니다.
+| 실제 확인 | 결과·증거 |
+| --- | --- |
+| 1.0.0 전체 파이프라인 | [01–11 성공](https://github.com/goseokbin-concert/langflow-shop-msa/actions/runs/40834109250). 사람이 운영 승인, 동일 이미지 9개 승격·운영 기능 검사 성공 |
+| 패치 PR 검사 | [3개 job 성공](https://github.com/goseokbin-concert/langflow-shop-msa/actions/runs/40836719449). 변경 범위·소스/이미지 CVE·의존성·health·CodeQL |
+| 1.0.1 Dev 리허설 | [01–09 성공](https://github.com/goseokbin-concert/langflow-shop-msa/actions/runs/40837083211). 실제 0.0.32 배포·수집 |
+| 10단계 도구 수정·재검증 | [동일 원본 스캔과 현재 Dev로 성공](https://github.com/goseokbin-concert/langflow-shop-msa/actions/runs/40839301118). 기능 9개·대상 CVE 제거 게이트·승격 번들 생성 통과. 앱 이미지 재빌드 없음 |
+| 환경 차이 | Workflows 실제 결과: Dev 1.0.1 / 0.0.32 / 대상 0건, 운영 1.0.0 / 0.0.6 / 1건 → awaiting_production |
+| 촬영 시작 상태 복원 | Concert 1.0.0 하나, 두 클러스터 9/9 Ready·동일 이미지 9개·0.0.6, Workflows target_present, 복원 후 Dev 기능 9개 재통과 |
+
+최초 리허설 10단계는 원본 Trivy JSON 대신 Concert 업로드용 CycloneDX를 읽어 실패했습니다. 로더를 수정하고 같은 인증된 원본 스캔·동일 Dev 이미지로 마지막 기능·게이트·승격 번들을 재검증했습니다. 최초 실행 전체가 한 번에 성공했다고 설명하지 않습니다.
+
+리허설 PR #8은 **병합하지 않고 종료**했으며 임시 브랜치·Concert 1.0.1·버전 바인딩을 정리했습니다. 따라서 위 명령으로 새 패치 PR을 만들 수 있습니다. 실제 1.0.1 운영 승격과 마지막 verified 장면은 촬영할 때 직접 승인하여 진행합니다.
+
+[기계 판독용 실제 확인 결과](recording-demo/rehearsal-evidence.json)
+
+![기본 자동 배정](recording-demo/01-native-cart-ticket.png)
+
+![Dev만 패치된 실제 비교](recording-demo/08-dev-patched-production-pending.png)
+
+![촬영 시작 상태의 실제 검증](recording-demo/07-baseline-verification.png)
+
+CI 연결 토큰은 2026-11-01 16:12 KST까지 유효합니다. 이후 실습에는 토큰을 갱신합니다. 브라우저 SSO는 촬영 전에 로그인합니다.
