@@ -1,0 +1,11 @@
+{
+  "repository": "OWNER/APPLICATION_REPOSITORY",
+  "concert_host": "CONCERT_HOST_WITHOUT_PROTOCOL",
+  "application_api": "/concert/core/api/v2/applications/APP_ID/versions/ANY_EXISTING_VERSION_ID",
+  "github_auth": "USERNAME/GitHubReadAuth",
+  "concert_auth": "USERNAME/ConcertReadAuth",
+  "staging_environment_id": "STAGING_ENVIRONMENT_ID",
+  "production_environment_id": "PRODUCTION_ENVIRONMENT_ID",
+  "staging_deployment_prefix": "deploy_langflow-shop-test_langflow-shop_",
+  "production_deployment_prefix": "deploy_langflow-shop-production_langflow-shop_"
+}

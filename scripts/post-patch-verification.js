@@ -1,0 +1,27 @@
+// Read-only verification of the current scanned images in two deployments.
+const documents={};
+for(const role of ["staging","production"]){
+ const packageResponse=role==="staging"?$Read_staging_packages:$Read_production_packages;
+ const cveResponse=role==="staging"?$Read_staging_cve_findings:$Read_production_cve_findings;
+ if(packageResponse.statusCode!==200||cveResponse.statusCode!==200)throw new Error("Missing "+role+" scan evidence");
+ const inventory=typeof packageResponse.result==="string"?JSON.parse(packageResponse.result):packageResponse.result;
+ const findings=typeof cveResponse.result==="string"?JSON.parse(cveResponse.result):cveResponse.result;
+ if(inventory.pagination.total_count>2000||findings.pagination.total_count>2000)throw new Error("Evidence pagination requires extension");
+ if(inventory.packages.length>=2000||findings.cve_findings.length>=2000)throw new Error("Evidence page may be incomplete");
+ const packages=inventory.packages.filter(p=>p.name.toLowerCase().replace(/_/g,"-")===$expected_package.toLowerCase().replace(/_/g,"-"));
+ const target=findings.cve_findings.filter(f=>f.cve===$cve);
+ const runtime=role==="staging"?$stagingRuntime:$productionRuntime;
+ documents[role]={image:runtime.image,artifact_id:runtime.artifact,release:$deploymentSnapshots[role].application_version,package_versions:[...new Set(packages.map(p=>p.version))].sort(),target_cve_rows:target.length,inventory_present:packages.length>0};
+}
+if($Read_release_runs.statusCode!==200)throw new Error("Missing deployment pipeline evidence");
+const runDoc=typeof $Read_release_runs.result==="string"?JSON.parse($Read_release_runs.result):$Read_release_runs.result;
+if(!Array.isArray(runDoc.workflow_runs)||!runDoc.workflow_runs.length)throw new Error("No deployment pipeline evidence");
+const run=runDoc.workflow_runs[0];
+const sameImage=documents.staging.image===documents.production.image;
+const matchingRelease=documents.staging.release===documents.production.release&&documents.production.release.endsWith("-"+run.head_sha.slice(0,12));
+const pipelineSucceeded=run.status==="completed"&&run.conclusion==="success";
+const inventoryComplete=documents.staging.inventory_present&&documents.production.inventory_present;
+const bothClear=documents.staging.target_cve_rows===0&&documents.production.target_cve_rows===0;
+const verified=bothClear&&sameImage&&matchingRelease&&pipelineSucceeded&&inventoryComplete;
+const verdict=verified?"verified":documents.staging.target_cve_rows===0&&documents.production.target_cve_rows>0?"awaiting_production":!bothClear?"target_present":"verification_incomplete";
+$result={verdict:verdict,verified:verified,writes_enabled:false,service:$service,expected_package:$expected_package,cve:$cve,environments:documents,checks:{both_target_cve_clear:bothClear,both_package_inventories_present:inventoryComplete,same_image_in_both_environments:sameImage,matching_release:matchingRelease,pipeline_succeeded:pipelineSucceeded},pipeline:run.html_url,evaluated_at:new Date().toISOString(),scope:"Current images recorded by the deployment pipeline in Concert; no ticket, owner, SLA, assessment or deployment is modified."};

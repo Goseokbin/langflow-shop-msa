@@ -52,4 +52,4 @@ python3 scripts/smoke-test.py
 
 ## CVE 조치 관리 데모
 
-[담당자·기한·배포 후 검증 가이드](docs/CVE_CASE_MANAGEMENT.md)는 Concert Workflows로 원본 CVE와 이슈를 연결하고, 일반 패치 PR 이후 두 환경의 조치 결과를 확인하는 방법을 설명합니다. 패치 정책을 CVE마다 등록하지 않으며, 현재 실제 검증 범위와 제품 수집 제한도 구분합니다.
+[기본 담당자·SLA·배포 후 검증 가이드](docs/NATIVE_GOVERNANCE.md)는 Automation rules로 티켓·담당자를, Goals로 SLA를 설정하고 Workflows는 두 환경의 패치 결과 조회에 사용하는 방법을 설명합니다. [이전 사용자 정의 데모](docs/CVE_CASE_MANAGEMENT.md)는 변경 이력으로 보존합니다.
