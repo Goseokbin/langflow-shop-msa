@@ -1,4 +1,4 @@
 {
-  "version": "1.0.0",
-  "remediation_policy": null
+  "version": "1.0.1",
+  "remediation_policy": "multipart-cart"
 }

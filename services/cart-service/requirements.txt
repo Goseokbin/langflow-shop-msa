@@ -5,7 +5,7 @@ psycopg2-binary==2.9.9
 pydantic==2.5.0
 pydantic-settings==2.1.0
 httpx==0.25.2
-python-multipart==0.0.6
+python-multipart==0.0.32
 python-jose[cryptography]==3.3.0
 # OpenTelemetry for Instana monitoring
 opentelemetry-api==1.21.0
