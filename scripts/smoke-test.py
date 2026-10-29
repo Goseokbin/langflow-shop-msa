@@ -9,6 +9,8 @@ import urllib.error
 import urllib.request
 import uuid
 
+from catalog_images import DEMO_PRODUCT_IMAGES, ensure_catalog_images, verify_catalog_images
+
 host = subprocess.check_output(
     [
         "oc",
@@ -80,12 +82,18 @@ if not products:
                 "price": price,
                 "inventory": 50,
                 "category": category,
+                "image_url": DEMO_PRODUCT_IMAGES[name],
             },
             method="POST",
             status=201,
         )
     products = req("/api/products")
 assert len(products) >= 1
+if ensure_catalog_images(req, products):
+    products = req("/api/products")
+image_checks = verify_catalog_images(products)
+if image_checks:
+    results.append("catalog images: " + str(len(image_checks)) + " reachable images")
 results.append("catalog: " + str(len(products)) + " products")
 product = products[0]
 before = product["inventory"]
