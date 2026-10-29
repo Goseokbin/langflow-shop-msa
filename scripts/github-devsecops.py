@@ -55,7 +55,13 @@ def context():
     api_spec=importlib.util.spec_from_file_location('release_api',source/'scripts/concert-audit-api.py')
     release_api=importlib.util.module_from_spec(api_spec);api_spec.loader.exec_module(release_api)
     from concert_release_context import configure
-    release_context=configure(release_api.Concert(authorization=auth),config['CONCERT_APP_API'],manifest,WORK/'output/release-context.json',config.get('APPLICATION_RELEASE_PREFIX','1.0.1'))
+    explicit_version=None
+    if config.get('APPLICATION_RELEASE_MODE')=='semantic':
+        from semantic_release import load_release,bind_release
+        release=load_release(source/'release.json')
+        explicit_version=release['version']
+        bind_release(explicit_version,manifest['git_base_commit'],namespace)
+    release_context=configure(release_api.Concert(authorization=auth),config['CONCERT_APP_API'],manifest,WORK/'output/release-context.json',config.get('APPLICATION_RELEASE_PREFIX','1.0.1'),explicit_version=explicit_version)
     os.environ.update(CONCERT_APP_API=release_context['application_api'],APPLICATION_VERSION=release_context['version'])
     if release_context.get('current_deployment_id'):os.environ['CONCERT_DEPLOYMENT_ID']=release_context['current_deployment_id']
     spec=importlib.util.spec_from_file_location('pipeline',source/'scripts/pipeline-stage.py')
@@ -117,6 +123,9 @@ def smoke(stages,manifest):
             'topology_counts':verification['topology_counts'],'internal_endpoints':verification['internal_endpoints'],
             'sast':read('sast-verification.json'),'commerce_smoke':'passed','oci_revision_verified_images':len(read('builds.json',[]))}
     stages.save('public-verification.json',public)
+    from semantic_release import verify_remediation
+    remediation=verify_remediation(source/'release.json',stages.OUT) if (source/'release.json').exists() else None
+    if remediation is not None:stages.save('remediation-gate.json',remediation)
     import promotion_bundle
     promotion_bundle.create_release(stages,manifest,stages.api.Concert(authorization=stages.AUTH))
     stages.event('smoke','succeeded',checks=len(result['results']))

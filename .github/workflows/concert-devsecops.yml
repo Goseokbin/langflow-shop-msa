@@ -2,7 +2,7 @@ name: Langflow shop DevSecOps
 on:
   push:
     branches: [main]
-    paths: ['services/**', 'scripts/**', 'openshift/**', '.github/actions/**', '.github/codeql/**', '.github/workflows/concert-devsecops.yml']
+    paths: ['release.json', 'services/**', 'scripts/**', 'openshift/**', '.github/actions/**', '.github/codeql/**', '.github/workflows/concert-devsecops.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -96,7 +96,7 @@ jobs:
           stage: concert-ingest
           previous: image-scan
   deploy:
-    name: 08 · 검증 OpenShift 배포
+    name: 08 · Dev OpenShift 배포
     needs: concert_ingest
     runs-on: ubuntu-24.04
     timeout-minutes: 30

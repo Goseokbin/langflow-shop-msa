@@ -35,6 +35,16 @@ class PostPatchVerification(unittest.TestCase):
         self.assertTrue(result['verified'])
         self.assertFalse(result['writes_enabled'])
 
+    def test_semantic_release_requires_actual_source_commit_evidence(self):
+        data=fixture();commit='a'*40
+        data['$Read_release_runs']['result']['workflow_runs'][0]['head_sha']=commit
+        for role in ['staging','production']:
+            data['$deploymentSnapshots'][role]['application_version']='1.0.1'
+            data['$Read_'+role+'_deployment']={'statusCode':200,'result':{'runtime-components':[{'properties':[{'name':'source.commit','value':commit}]}]}}
+        self.assertTrue(evaluate(data)['verified'])
+        data['$Read_production_deployment']['result']['runtime-components'][0]['properties'][0]['value']='b'*40
+        self.assertFalse(evaluate(data)['verified'])
+
     def test_remaining_cve_even_manually_closed_is_not_remediated(self):
         data = fixture()
         for role in ['staging', 'production']:

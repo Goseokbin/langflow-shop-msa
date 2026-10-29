@@ -72,6 +72,10 @@ class PromotionPipelineTests(unittest.TestCase):
             blob=bytearray(path.read_bytes());blob[-1]^=1;path.write_bytes(blob)
             with self.assertRaisesRegex(ValueError,'hash differs'):unseal(path,digest,key)
             with self.assertRaisesRegex(ValueError,'authentication failed'):unseal(path,hashlib.sha256(blob).hexdigest(),key)
+    def test_additional_catalog_checks_do_not_invalidate_verified_commerce(self):
+        r=release();r['verification']['commerce_passed']=9
+        validate_release(r)
+
     def test_unverified_or_substituted_images_rejected(self):
         for change in ['digest','checks','missing','secret','hostpath']:
             r=release()

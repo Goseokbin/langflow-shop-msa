@@ -16,9 +16,22 @@ for(const role of ["staging","production"]){
 if($Read_release_runs.statusCode!==200)throw new Error("Missing deployment pipeline evidence");
 const runDoc=typeof $Read_release_runs.result==="string"?JSON.parse($Read_release_runs.result):$Read_release_runs.result;
 if(!Array.isArray(runDoc.workflow_runs)||!runDoc.workflow_runs.length)throw new Error("No deployment pipeline evidence");
-const run=runDoc.workflow_runs[0];
+function sourceCommit(response){
+ if(!response||response.statusCode!==200)return null;
+ const doc=typeof response.result==="string"?JSON.parse(response.result):response.result;
+ const found=new Set();
+ function walk(x){if(Array.isArray(x))x.forEach(walk);else if(x&&typeof x==="object"){
+  if(["source.commit","source.git_base_commit"].includes(x.name)&&/^[a-f0-9]{40}$/.test(x.value))found.add(x.value);
+  Object.values(x).forEach(walk);
+ }}
+ walk(doc);return found.size===1?[...found][0]:null;
+}
+const devCommit=sourceCommit(typeof $Read_staging_deployment==="undefined"?null:$Read_staging_deployment);
+const prodCommit=sourceCommit(typeof $Read_production_deployment==="undefined"?null:$Read_production_deployment);
+const compatible=runDoc.workflow_runs.filter(r=>documents.production.release.endsWith("-"+r.head_sha.slice(0,12))||(devCommit&&devCommit===prodCommit&&r.head_sha===devCommit));
+const run=compatible[0]||runDoc.workflow_runs[0];
 const sameImage=documents.staging.image===documents.production.image;
-const matchingRelease=documents.staging.release===documents.production.release&&documents.production.release.endsWith("-"+run.head_sha.slice(0,12));
+const matchingRelease=documents.staging.release===documents.production.release&&(documents.production.release.endsWith("-"+run.head_sha.slice(0,12))||(devCommit&&devCommit===prodCommit&&run.head_sha===devCommit));
 const pipelineSucceeded=run.status==="completed"&&run.conclusion==="success";
 const inventoryComplete=documents.staging.inventory_present&&documents.production.inventory_present;
 const bothClear=documents.staging.target_cve_rows===0&&documents.production.target_cve_rows===0;

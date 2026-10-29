@@ -53,6 +53,12 @@ if __name__ == '__main__':
     if args.mode == 'diff':
         before = subprocess.check_output(['git', 'show', args.value + ':' + POLICY['file']], text=True)
         changed = subprocess.check_output(['git', 'diff', '--name-only', args.value, 'HEAD'], text=True).splitlines()
+        if 'release.json' in changed:
+            previous=json.loads(subprocess.check_output(['git','show',args.value+':release.json'],text=True))
+            current=json.loads((ROOT/'release.json').read_text())
+            if previous!={'version':'1.0.0','remediation_policy':None} or current!={'version':'1.0.1','remediation_policy':'multipart-cart'} or os.environ.get('PATCH_POLICY')!='multipart-cart':
+                raise ValueError('Only the recording demo 1.0.0 to 1.0.1 release transition is permitted')
+            changed.remove('release.json')
         validate_change(before, (ROOT / POLICY['file']).read_text(), changed)
         print('Approved one-line patch scope verified')
     else:

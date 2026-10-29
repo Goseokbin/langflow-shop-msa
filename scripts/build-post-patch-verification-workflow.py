@@ -53,7 +53,7 @@ if(typeof $expected_package!=="string"||!$expected_package.trim()||$expected_pac
         {'name': 'path', 'value': '"/repos/"+$config.repository+"/actions/workflows/concert-devsecops.yml/runs"'},
         {'name': 'authKey', 'value': '$config.github_auth'},
         {'name': 'headers', 'value': '{"Accept":"application/json","User-Agent":"Concert-Post-Patch-Verification"}'},
-        {'name': 'query', 'value': '{"branch":"main","event":"push","per_page":5}'},
+        {'name': 'query', 'value': '{"branch":"main","per_page":20}'},
         {'name': 'rejectUnauthorized', 'value': 'true'}, {'name': 'timeout', 'value': '60'}]},
         {'name': '02_Verify_two_current_deployments', 'function': (HERE/'post-patch-verification.js').read_text()}]
     # Safety invariant: this flow cannot mutate any external system.

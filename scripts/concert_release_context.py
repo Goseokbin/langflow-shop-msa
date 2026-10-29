@@ -72,8 +72,11 @@ def wait_for_blueprint(client,response,parent,version,expected,timeout=900):
         time.sleep(3)
 
 
-def configure(client,template,manifest,destination,prefix='1.0.1'):
+def configure(client,template,manifest,destination,prefix='1.0.1',explicit_version=None):
     destination=Path(destination);version=release_version(manifest['git_base_commit'],prefix)
+    if explicit_version is not None:
+        if not re.fullmatch(r'\d+\.\d+\.\d+',explicit_version):raise ValueError('Expected a semantic release version')
+        version=explicit_version
     if destination.exists():
         result=json.loads(destination.read_text())
         if result['commit']!=manifest['git_base_commit'] or result['version']!=version:raise ValueError('Concert context belongs to another source revision')

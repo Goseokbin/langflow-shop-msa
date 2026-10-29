@@ -54,8 +54,12 @@ def validate_release(release):
                 raise ValueError('Secret values must not enter a release bundle')
         if any(v.get('hostPath') for v in deployment['spec']['template']['spec'].get('volumes',[])):
             raise ValueError('Release workload may not mount host paths')
-    if release['verification'].get('commerce_passed')!=8 or not release['verification'].get('internal_endpoints_verified'):
+    if release['verification'].get('commerce_passed',0)<8 or not release['verification'].get('internal_endpoints_verified'):
         raise ValueError('A release requires commerce and Concert endpoint verification')
+    if release.get('application_version')=='1.0.1':
+        gate=release['verification'].get('remediation') or {}
+        if gate.get('passed') is not True or gate.get('policy')!='multipart-cart':
+            raise ValueError('Release 1.0.1 requires the selected cart-service CVE remediation gate')
     return release
 
 
@@ -129,7 +133,7 @@ def create_release(stages, manifest, client):
         'concert_application_api':os.environ['CONCERT_APP_API'],
         'images':sorted(images,key=lambda r:r['name']),'deployments':deployments,'services':services,'routes':routes,
         'deployment_sbom':client.request(f'/concert/core/api/v2/environments/{env}/deployments/{deploy}/sbom'),
-        'verification':{'commerce_passed':smoke['passed'],'internal_endpoints_verified':verification['internal_endpoints']['verified'],
+        'verification':{'remediation':json.loads((stages.OUT/'remediation-gate.json').read_text()) if (stages.OUT/'remediation-gate.json').exists() else None,'commerce_passed':smoke['passed'],'internal_endpoints_verified':verification['internal_endpoints']['verified'],
                         'api_paths':verification['internal_endpoints']['api_paths'],'scanned_images':len(scans)}}
     destination=stages.OUT/'release.enc';digest=seal(release,destination,os.environ['PROMOTION_STATE_KEY'])
     stages.save('promotion-release.json',{'sha256':digest,'images':[{k:r[k] for k in ['name','digest']} for r in release['images']],
